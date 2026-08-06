@@ -374,7 +374,7 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader, cfg ex
 
 		directoryMode := os.FileMode(header.Mode) & os.ModePerm //nolint:gosec // mask tar mode to permission bits
 
-		if err := root.MkdirAll(directoryName, fileperms.PublicDir); err != nil {
+		if err := ensureDirectory(root, directoryName); err != nil {
 			return fmt.Errorf("creating directory %#q:\n%w", name, err)
 		}
 
@@ -383,7 +383,7 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader, cfg ex
 		return nil
 	}
 
-	if err := root.MkdirAll(filepath.Dir(name), fileperms.PublicDir); err != nil {
+	if err := ensureDirectory(root, filepath.Dir(name)); err != nil {
 		return fmt.Errorf("creating parent for %#q:\n%w", name, err)
 	}
 
@@ -421,6 +421,45 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader, cfg ex
 
 		return nil
 	}
+}
+
+// ensureDirectory creates name and applies a deterministic mode to every
+// implicit parent it materializes. MkdirAll applies the process umask, so the
+// mode is restored immediately instead of being deferred with explicitly
+// archived directory modes. This avoids applying a default mode through a
+// symlink alias after an explicit directory entry has restored its own mode.
+func ensureDirectory(root *os.Root, name string) error {
+	name = filepath.Clean(name)
+	if name == "." {
+		return nil
+	}
+
+	var missingPaths []string
+
+	for current := name; current != "."; current = filepath.Dir(current) {
+		if _, err := root.Stat(current); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("checking directory %#q:\n%w", current, err)
+		}
+
+		missingPaths = append(missingPaths, current)
+	}
+
+	if err := root.MkdirAll(name, fileperms.PublicDir); err != nil {
+		return fmt.Errorf("materializing directory %#q:\n%w", name, err)
+	}
+
+	// Set parents before children. A restrictive umask can otherwise make a
+	// newly-created parent untraversable before its child is chmodded.
+	for idx := len(missingPaths) - 1; idx >= 0; idx-- {
+		path := missingPaths[idx]
+		if err := root.Chmod(path, fileperms.PublicDir); err != nil {
+			return fmt.Errorf("setting permissions on implicit directory %#q:\n%w", path, err)
+		}
+	}
+
+	return nil
 }
 
 // restoreDirectoryModes applies archive directory modes after all content has
@@ -477,6 +516,12 @@ func extractRegularFile(root *os.Root, header *tar.Header, src io.Reader) (err e
 	// so any error here means the entry is short or unreadable.
 	if _, copyErr := io.CopyN(outFile, src, header.Size); copyErr != nil {
 		return fmt.Errorf("writing file %#q:\n%w", name, copyErr)
+	}
+
+	// OpenFile applies the process umask when it creates the file. Restore the
+	// archived permission bits explicitly so repacking is host-independent.
+	if chmodErr := outFile.Chmod(mode); chmodErr != nil {
+		return fmt.Errorf("setting permissions on file %#q:\n%w", name, chmodErr)
 	}
 
 	return nil

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/archive"
@@ -177,7 +178,11 @@ func createTestTarGz(t *testing.T, path string, entries []testTarEntry) {
 				header.Mode = 0o755
 			}
 		case tar.TypeReg:
-			header.Mode = 0o644
+			header.Mode = entry.mode
+			if header.Mode == 0 {
+				header.Mode = 0o644
+			}
+
 			header.Size = int64(len(entry.content))
 		case tar.TypeSymlink:
 			header.Linkname = entry.linkname
@@ -248,6 +253,36 @@ func TestRoundTrip_AllCompressions(t *testing.T) {
 			assert.Equal(t, data1, data2, "deterministic archive should produce identical output")
 		})
 	}
+}
+
+func TestCreateDeterministicArchive_ZstdIndependentOfGOMAXPROCS(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "src")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(sourceDir, "content.bin"),
+		bytes.Repeat([]byte("deterministic content\n"), 64*1024),
+		0o600,
+	))
+
+	create := func(name string, maxProcs int) []byte {
+		previousMaxProcs := runtime.GOMAXPROCS(maxProcs)
+		defer runtime.GOMAXPROCS(previousMaxProcs)
+
+		archivePath := filepath.Join(tmpDir, name+".tar.zst")
+		require.NoError(t, archive.CreateDeterministicArchive(
+			archivePath, sourceDir, archive.CompressionZstd,
+		))
+
+		data, err := os.ReadFile(archivePath)
+		require.NoError(t, err)
+
+		return data
+	}
+
+	singleCPU := create("single-cpu", 1)
+	multipleCPUs := create("multiple-cpus", 4)
+	assert.Equal(t, singleCPU, multipleCPUs, "zstd output must not depend on GOMAXPROCS")
 }
 
 func TestExtractAndRepack_PreservesExplicitDirectoryPermissions(t *testing.T) {
