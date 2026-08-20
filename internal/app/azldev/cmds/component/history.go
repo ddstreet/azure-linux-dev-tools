@@ -227,10 +227,6 @@ type HistoryResult struct {
 	// HasLock is true when a lock file currently exists for this component.
 	HasLock bool `json:"hasLock,omitempty" table:"-"`
 
-	// HasImport is true when the lock file records a non-empty
-	// import-commit (i.e., the component was forked from upstream).
-	HasImport bool `json:"hasImport,omitempty" table:"-"`
-
 	// Warnings collects per-component diagnostics for failure paths that
 	// were swallowed to keep the overall report rendering. Empty when no
 	// problems were encountered. Surfaces in the single-component card

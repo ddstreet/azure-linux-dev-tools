@@ -271,7 +271,7 @@ func populateTomlMetrics(
 }
 
 // populateLockMetrics fills in FingerprintChanges, FingerprintChangeDetails,
-// HasLock and HasImport.
+// and HasLock.
 // A missing lock file is "no data", not an error; a genuine read failure
 // (corrupt/unparseable lock) is surfaced via result.Warnings so a
 // tomlCommits/fingerprintChanges of 0 can't be silently confused with a
@@ -295,7 +295,6 @@ func populateLockMetrics(
 		switch {
 		case lockErr == nil && lock != nil:
 			result.HasLock = true
-			result.HasImport = lock.ImportCommit != ""
 		case lockErr != nil:
 			// Distinguish a missing lock ("no data", expected) from a real
 			// read failure (corrupt/unparseable lock). Mirror the store's

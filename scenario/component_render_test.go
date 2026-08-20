@@ -787,7 +787,6 @@ cd project
 # This creates synthetic commit S0 which interleaving must place BEFORE
 # the version bump at C2, proving it doesn't inflate v1.1's release.
 cat > locks/test-pkg.lock <<EOF
-import-commit = "$FIRST_COMMIT"
 upstream-commit = "$FIRST_COMMIT"
 input-fingerprint = "fp0-imported-on-v1"
 EOF
@@ -796,7 +795,6 @@ git -c commit.gpgsign=false commit -m "Import test-pkg at v1.0"
 
 # Lock commit 1: updated to latest upstream (fingerprint fp1)
 cat > locks/test-pkg.lock <<EOF
-import-commit = "$FIRST_COMMIT"
 upstream-commit = "$HEAD_COMMIT"
 input-fingerprint = "fp1-updated-to-latest"
 EOF
@@ -805,7 +803,6 @@ git -c commit.gpgsign=false commit -m "Update test-pkg to v1.1"
 
 # Lock commit 2: simulated overlay addition (fingerprint fp2)
 cat > locks/test-pkg.lock <<EOF
-import-commit = "$FIRST_COMMIT"
 upstream-commit = "$HEAD_COMMIT"
 input-fingerprint = "fp2-added-buildrequires"
 EOF

@@ -574,7 +574,7 @@ func (r *Resolver) createComponentFromConfig(componentConfig *projectconfig.Comp
 // locked state automatically via config.Locked.
 //
 // Works for both upstream and local components. For local components, the lock
-// file will have empty UpstreamCommit/ImportCommit fields but a populated
+// file will have an empty UpstreamCommit field but a populated
 // InputFingerprint.
 //
 // IMPORTANT: This must NEVER overwrite user-specified config values. Lock data
@@ -611,7 +611,6 @@ func (r *Resolver) populateFromLock(config *projectconfig.ComponentConfig) {
 
 	config.Locked = &projectconfig.ComponentLockData{
 		UpstreamCommit:      lock.UpstreamCommit,
-		ImportCommit:        lock.ImportCommit,
 		InputFingerprint:    lock.InputFingerprint,
 		ResolutionInputHash: lock.ResolutionInputHash,
 	}

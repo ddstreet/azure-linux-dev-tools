@@ -88,9 +88,7 @@ func renderCardView(writer io.Writer, result HistoryResult) {
 	}
 
 	if result.HasLock {
-		fmt.Fprintf(writer,
-			"  Lock state:     locked (has-import=%t)\n",
-			result.HasImport)
+		fmt.Fprintln(writer, "  Lock state:     locked")
 	} else {
 		fmt.Fprintln(writer, "  Lock state:     no lock")
 	}

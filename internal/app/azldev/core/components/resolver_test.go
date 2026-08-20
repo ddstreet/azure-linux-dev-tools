@@ -794,7 +794,7 @@ value = "Microsoft"
 }
 
 // When a lock file exists for a component, the resolver should attach all of
-// its data (commit, import-commit, fingerprint) to the resolved
+// its data (commit and fingerprint) to the resolved
 // component via the Locked field — without touching the original Spec config.
 // This is how downstream commands (render, build) get the locked commit.
 func TestFindComponents_PopulatesLockedData(t *testing.T) {
@@ -811,7 +811,6 @@ func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	// Create a lock file with upstream commit.
 	lock := lockfile.New()
 	lock.UpstreamCommit = "locked-commit-abc123"
-	lock.ImportCommit = "import-commit-def456"
 	lock.InputFingerprint = "sha256:test-fingerprint"
 
 	env.WriteLock(t, "curl", lock)
@@ -827,7 +826,6 @@ func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	// Locked field should be populated from the lock file.
 	require.NotNil(t, comp.GetConfig().Locked, "Locked should be populated when lock file exists")
 	assert.Equal(t, "locked-commit-abc123", comp.GetConfig().Locked.UpstreamCommit)
-	assert.Equal(t, "import-commit-def456", comp.GetConfig().Locked.ImportCommit)
 	assert.Equal(t, "sha256:test-fingerprint", comp.GetConfig().Locked.InputFingerprint)
 
 	// Original config field should NOT be modified.

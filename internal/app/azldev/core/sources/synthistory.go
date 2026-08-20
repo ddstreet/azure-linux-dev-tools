@@ -118,13 +118,9 @@ func FindFingerprintChanges(
 // referencing an older upstream commit are placed directly after that commit;
 // those referencing the latest upstream commit are appended on top. The very
 // last synthetic commit carries the overlay file changes; all others are empty.
-//
-// When importCommit is non-empty, only upstream commits from importCommit
-// onward are considered for interleaving.
 func CommitInterleavedHistory(
 	repo *gogit.Repository,
 	changes []FingerprintChange,
-	importCommit string,
 ) error {
 	// No changes means no synthetic commits to create, so skip the whole process.
 	if len(changes) == 0 {
@@ -138,7 +134,7 @@ func CommitInterleavedHistory(
 
 	// Collect upstream commits BEFORE staging, so the temporary commit
 	// created by stageAndCaptureOverlayTree is not included.
-	upstreamCommits, err := collectUpstreamCommits(repo, importCommit, upstreamCommit)
+	upstreamCommits, err := collectUpstreamCommits(repo, upstreamCommit)
 	if err != nil {
 		return err
 	}
@@ -257,9 +253,9 @@ func buildInterleavedSequence(
 
 // replayInterleavedHistory walks the interleaved sequence and creates new
 // commit objects with correct tree hashes and parent chains. The first upstream
-// commit (import-commit) is kept as-is; subsequent upstream commits are
-// recreated with updated parents. Synthetic commits are empty except for the
-// very last one, which carries the overlay tree.
+// commit is kept as-is; subsequent upstream commits are recreated with updated
+// parents. Synthetic commits are empty except for the very last one, which
+// carries the overlay tree.
 func replayInterleavedHistory(
 	repo *gogit.Repository,
 	sequence []interleavedEntry,
@@ -464,25 +460,25 @@ func buildSyntheticCommits(
 	componentName string,
 	lockDir string,
 	currentFingerprint string,
-) (changes []FingerprintChange, importCommit string, err error) {
+) ([]FingerprintChange, error) {
 	projectRepo, projectRepoDir, err := openProjectRepo(config, componentName)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if projectRepo == nil {
-		return nil, "", nil
+		return nil, nil
 	}
 
 	// Compute the lock file path relative to the git repository root.
 	lockFileAbsPath, err := lockfile.LockPath(lockDir, componentName)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolving lock file path for %#q:\n%w", componentName, err)
+		return nil, fmt.Errorf("resolving lock file path for %#q:\n%w", componentName, err)
 	}
 
 	lockFileRelPath, err := filepath.Rel(projectRepoDir, lockFileAbsPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to compute repo-relative lock path for %#q:\n%w",
+		return nil, fmt.Errorf("failed to compute repo-relative lock path for %#q:\n%w",
 			lockFileAbsPath, err)
 	}
 
@@ -490,18 +486,16 @@ func buildSyntheticCommits(
 	// synthetic history is skipped.
 	headLock, err := readLockFileAtHEAD(projectRepo, lockFileRelPath)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if headLock == nil {
-		return nil, "", nil
+		return nil, nil
 	}
-
-	importCommit = headLock.ImportCommit
 
 	fpChanges, err := FindFingerprintChanges(ctx, cmdFactory, projectRepo, projectRepoDir, lockFileRelPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to find fingerprint changes for lock file %#q:\n%w",
+		return nil, fmt.Errorf("failed to find fingerprint changes for lock file %#q:\n%w",
 			lockFileRelPath, err)
 	}
 
@@ -510,7 +504,7 @@ func buildSyntheticCommits(
 	if len(fpChanges) == 0 {
 		shallowCommits, _ := projectRepo.Storer.Shallow()
 		if len(shallowCommits) > 0 {
-			return nil, "", fmt.Errorf(
+			return nil, fmt.Errorf(
 				"lock file %#q has no git history; a full clone is required",
 				lockFileRelPath)
 		}
@@ -529,10 +523,10 @@ func buildSyntheticCommits(
 		slog.Warn("Lock file has no fingerprint changes; skipping synthetic history",
 			"lockFile", lockFileRelPath)
 
-		return nil, "", nil
+		return nil, nil
 	}
 
-	return fpChanges, importCommit, nil
+	return fpChanges, nil
 }
 
 // BuildDirtyChange returns a [FingerprintChange] representing uncommitted
@@ -648,24 +642,26 @@ func readLockFileAtHEAD(
 }
 
 // collectUpstreamCommits returns commits in the repository in chronological
-// order (oldest first), bounded by importCommit (inclusive start) and
-// upstreamCommit (inclusive end). Only first-parent links are followed so that
-// merge commits are included but side-branch commits are excluded, producing a
-// linear mainline history suitable for replay.
+// order (oldest first), ending at upstreamCommit. Only first-parent links are
+// followed so that merge commits are included but side-branch commits are
+// excluded, producing a linear mainline history suitable for replay.
 func collectUpstreamCommits(
-	repo *gogit.Repository, importCommit, upstreamCommit string,
+	repo *gogit.Repository, upstreamCommit string,
 ) ([]*object.Commit, error) {
 	head, err := repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get HEAD reference:\n%w", err)
 	}
 
-	// Walk newest-first following only first parents.  Collect commits
-	// between upstreamCommit (newest boundary) and importCommit (oldest).
+	// Walk newest-first following only first parents. Start collecting at
+	// upstreamCommit and continue to the root commit. The lock no longer stores
+	// a separate import boundary, so the repository's first-parent root is the
+	// only durable beginning of the history. This keeps reconstruction derived
+	// from Git itself instead of preserving a second, potentially stale fork
+	// point in component state.
 	var (
 		commits       []*object.Commit
 		foundUpstream bool
-		foundImport   bool
 		collecting    = upstreamCommit == "" // if no upper bound, collect from start.
 		currentHash   = head.Hash()
 	)
@@ -691,13 +687,6 @@ func collectUpstreamCommits(
 			foundUpstream = true
 		}
 
-		// Stop once we reach the import-commit (oldest boundary).
-		if importCommit != "" && hash == importCommit {
-			foundImport = true
-
-			break
-		}
-
 		// Follow only the first parent to stay on the mainline.
 		if len(commit.ParentHashes) == 0 {
 			break
@@ -711,13 +700,6 @@ func collectUpstreamCommits(
 			"upstream-commit %#q not found in dist-git history; "+
 				"the lock file may reference a commit from a different branch",
 			upstreamCommit)
-	}
-
-	if importCommit != "" && !foundImport {
-		return nil, fmt.Errorf(
-			"import-commit %#q not found in dist-git history; "+
-				"the repository may be a shallow clone or the commit may have been rebased away",
-			importCommit)
 	}
 
 	// Walk was newest-first; reverse to chronological.
