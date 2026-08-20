@@ -35,17 +35,6 @@ type ComponentLock struct {
 	// upstream-commit, distro release version). Recomputed on
 	// every update. Used to detect when inputs have changed.
 	InputFingerprint string `toml:"input-fingerprint,omitempty"`
-
-	// ResolutionInputHash is a hash of the config inputs that affect upstream
-	// commit resolution (snapshot timestamp, distro reference, explicit pin).
-	// Used for staleness detection: if the current config's resolution inputs
-	// produce a different hash than what's stored, the locked upstream commit
-	// may no longer be correct and 'component update' will re-resolve it.
-	//
-	// This enables a fast check without re-resolving upstream commits:
-	//   - Hash matches → resolution inputs unchanged, reuse locked commit
-	//   - Hash differs → resolution inputs changed, re-resolve required
-	ResolutionInputHash string `toml:"resolution-input-hash,omitempty"`
 }
 
 // New creates a new empty component lock.

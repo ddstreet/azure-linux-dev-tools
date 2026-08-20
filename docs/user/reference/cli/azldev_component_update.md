@@ -50,7 +50,6 @@ azldev component update [flags]
       --check-only                    resolve identities and recompute fingerprints but do not write lock files or prune orphans. Exits 0 when nothing would change and 1 when any component is stale (or, with --all-components, when any orphan lock would be pruned). Intended for CI gates
   -p, --component stringArray         Component name pattern
   -g, --component-group stringArray   Component group name
-      --force-recalculate             force re-resolution of all components, ignoring freshness checks that would skip unchanged components. Use when upstream state may have changed independently of the snapshot time and the new commit is preferred
   -h, --help                          help for update
   -s, --spec-path stringArray         Spec path
 ```
