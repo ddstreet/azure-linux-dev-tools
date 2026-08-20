@@ -2,25 +2,26 @@
 
 ## azldev component update
 
-Resolve and lock source identities for components
+Resolve and record upstream commits for components
 
 ### Synopsis
 
-Resolve upstream commits for components and write them to per-component lock files.
+Resolve upstream commits for components and write normal per-component TOML configuration.
 
 For upstream components, this resolves the effective commit hash using the
-distro snapshot time or explicit pin, then records it in locks/<name>.lock.
-Subsequent commands (render, build) use the locked state for deterministic,
-reproducible results.
+distro snapshot time, then records it as spec.upstream-commit in
+base/upstream-commits/<name>.toml by default. Include that directory's TOML
+files from the project configuration so subsequent commands use the resolved
+commit for deterministic, reproducible results.
 
-When updating all components (-a), orphan lock files (locks for components
-that no longer exist in the project config) are automatically pruned.
+When updating all components (-a), orphan generated TOML files are
+automatically pruned.
 Orphan pruning is skipped when updating individual components to avoid
-accidentally removing lock files for components not included in the filter.
+accidentally removing files for components not included in the filter.
 
-The --check-only flag runs the full pipeline but does NOT write lock files or
+The --check-only flag runs the full pipeline but does NOT write TOML files or
 prune orphans. The command exits 0 when nothing would change and exits 1 when
-any component is stale or any lock would be pruned. Intended for CI gates.
+any component is stale or any generated TOML would be pruned. Intended for CI gates.
 
 ```
 azldev component update [flags]
@@ -38,7 +39,10 @@ azldev component update [flags]
   # Update components in a group
   azldev component update -g core
 
-  # CI gate: exit 0 if locks are fresh, 1 if anything would change
+  # Write generated files to a custom directory
+  azldev component update -a --upstream-commits-dir config/commits
+
+  # CI gate: exit 0 if commit TOMLs are current, 1 if anything would change
   azldev component update -a --check-only -q
 ```
 
@@ -46,11 +50,12 @@ azldev component update [flags]
 
 ```
   -a, --all-components                Include all components
-      --check-only                    resolve upstream commits but do not write lock files or prune orphans. Exits 0 when nothing would change and 1 when any component is stale (or, with --all-components, when any orphan lock would be pruned). Intended for CI gates
+      --check-only                    resolve upstream commits but do not write TOML files or prune orphans. Exits 0 when nothing would change and 1 when any component is stale (or, with --all-components, when any orphan generated TOML would be pruned). Intended for CI gates
   -p, --component stringArray         Component name pattern
   -g, --component-group stringArray   Component group name
   -h, --help                          help for update
   -s, --spec-path stringArray         Spec path
+      --upstream-commits-dir string   directory for generated per-component upstream-commit TOML files (default "base/upstream-commits")
 ```
 
 ### Options inherited from parent commands

@@ -25,7 +25,7 @@ All config files share the same schema — there is no distinction between a "ro
 The `includes` field lists glob patterns for additional config files to load and merge:
 
 ```toml
-includes = ["distro/distro.toml", "base/project.toml"]
+includes = ["distro/distro.toml", "base/project.toml", "base/upstream-commits/*.toml"]
 ```
 
 | Field | Type | Description |
@@ -41,7 +41,7 @@ Includes are resolved recursively — included files can themselves declare furt
 A minimal root config file that includes distro definitions and a project:
 
 ```toml
-includes = ["distro/distro.toml", "base/project.toml"]
+includes = ["distro/distro.toml", "base/project.toml", "base/upstream-commits/*.toml"]
 ```
 
 A project-level config file with its own includes:

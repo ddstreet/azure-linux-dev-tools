@@ -85,7 +85,6 @@ Use `testutils.NewTestEnv(t)` for tests that need an `azldev.Env`. It provides:
 - In-memory filesystem (`env.TestFS` / `afero.MemMapFs`)
 - Mock command factory (`env.CmdFactory`)
 - Project config with test distro ("test-distro" v1.0, ReleaseVer "3.0")
-- Lock store backed by memfs (at `/project/locks/`)
 
 ## Mock Components
 
@@ -141,16 +140,6 @@ func (d *noOpDownloader) ExtractSourcesFromRepo(...) error { return nil }
 
 Prefer generated gomock mocks for interfaces with 3+ methods or when you need
 to verify specific call expectations.
-
-## Lock Files in Tests
-
-Use `env.WriteLock(t, name, lock)` to create lock files on the test filesystem:
-
-```go
-lock := lockfile.New()
-lock.UpstreamCommit = "abc123"
-env.WriteLock(t, "curl", lock)
-```
 
 ## Mocking External Commands
 

@@ -17,9 +17,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/git"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 // CommitMetadata holds full metadata for a commit in the project repository.
@@ -31,14 +31,13 @@ type CommitMetadata struct {
 	Message     string
 }
 
-// LockChange records a project commit that changed a component's lock file.
-// [UpstreamCommit] is the value of the 'upstream-commit' field in the lock file
-// at the point of the change.
-type LockChange struct {
+// UpstreamCommitChange records a project commit that changed a component's
+// configured upstream commit.
+type UpstreamCommitChange struct {
 	CommitMetadata
 
-	// UpstreamCommit is the upstream dist-git commit hash recorded in the lock
-	// file at the time of the change.
+	// UpstreamCommit is the upstream dist-git commit hash configured at the
+	// time of the change.
 	UpstreamCommit string
 }
 
@@ -46,20 +45,20 @@ type LockChange struct {
 // Exactly one of upstreamCommit or syntheticChange is non-nil.
 type interleavedEntry struct {
 	upstreamCommit  *object.Commit
-	syntheticChange *LockChange
+	syntheticChange *UpstreamCommitChange
 }
 
-// FindLockChanges walks the git log of the project repository for commits that
-// changed the given lock file. Results are sorted chronologically (oldest first).
-func FindLockChanges(
+// FindUpstreamCommitChanges walks the git log for commits that changed a
+// component's generated TOML file. Results are chronological (oldest first).
+func FindUpstreamCommitChanges(
 	ctx context.Context,
 	cmdFactory opctx.CmdFactory,
 	projectRepo *gogit.Repository,
 	projectRepoDir string,
-	lockFileRelPath string,
-) ([]LockChange, error) {
-	// Get commit metadata (newest-first) for all commits that touched the lock file.
-	metas, err := gitLogFileMetadata(ctx, cmdFactory, projectRepoDir, lockFileRelPath)
+	configFileRelPath string,
+	componentName string,
+) ([]UpstreamCommitChange, error) {
+	metas, err := gitLogFileMetadata(ctx, cmdFactory, projectRepoDir, configFileRelPath)
 	if err != nil {
 		return nil, err
 	}
@@ -68,39 +67,41 @@ func FindLockChanges(
 		return nil, nil
 	}
 
-	// Pair each commit's metadata with its lock file contents.
 	type entry struct {
-		lock lockfile.ComponentLock
-		meta CommitMetadata
+		upstreamCommit string
+		meta           CommitMetadata
 	}
 
 	var entries []entry //nolint:prealloc // size not known ahead of time.
 
 	for _, meta := range metas {
-		lock, err := lockfile.ShowAtCommit(projectRepo, meta.Hash, lockFileRelPath)
-		if errors.Is(err, object.ErrFileNotFound) {
+		upstreamCommit, err := showUpstreamCommitAtCommit(
+			projectRepo, meta.Hash, configFileRelPath, componentName,
+		)
+		if errors.Is(err, object.ErrFileNotFound) || errors.Is(err, object.ErrDirectoryNotFound) {
 			commit, commitErr := projectRepo.CommitObject(plumbing.NewHash(meta.Hash))
 			if commitErr != nil {
-				return nil, fmt.Errorf("failed to resolve lock deletion commit %#q:\n%w",
+				return nil, fmt.Errorf("failed to resolve config deletion commit %#q:\n%w",
 					meta.Hash, commitErr)
 			}
 
 			parent, parentErr := commit.Parent(0)
 			if parentErr != nil {
-				return nil, fmt.Errorf("failed to resolve parent of lock deletion commit %#q:\n%w",
+				return nil, fmt.Errorf("failed to resolve parent of config deletion commit %#q:\n%w",
 					meta.Hash, parentErr)
 			}
 
-			// Associate a deletion with the pin it removed so the history event
-			// stays at the correct position in the upstream timeline.
-			lock, err = lockfile.ShowAtCommit(projectRepo, parent.Hash.String(), lockFileRelPath)
+			upstreamCommit, err = showUpstreamCommitAtCommit(
+				projectRepo, parent.Hash.String(), configFileRelPath, componentName,
+			)
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to read lock file at commit %#q:\n%w", meta.Hash, err)
+			return nil, fmt.Errorf("failed to read upstream commit TOML at commit %#q:\n%w",
+				meta.Hash, err)
 		}
 
-		entries = append(entries, entry{lock: lock, meta: meta})
+		entries = append(entries, entry{upstreamCommit: upstreamCommit, meta: meta})
 	}
 
 	if len(entries) == 0 {
@@ -110,15 +111,54 @@ func FindLockChanges(
 	// Entries are newest-first (from git log order). Reverse to chronological.
 	slices.Reverse(entries)
 
-	changes := make([]LockChange, 0, len(entries))
+	changes := make([]UpstreamCommitChange, 0, len(entries))
 	for _, change := range entries {
-		changes = append(changes, LockChange{
+		changes = append(changes, UpstreamCommitChange{
 			CommitMetadata: change.meta,
-			UpstreamCommit: change.lock.UpstreamCommit,
+			UpstreamCommit: change.upstreamCommit,
 		})
 	}
 
 	return changes, nil
+}
+
+func showUpstreamCommitAtCommit(
+	repo *gogit.Repository,
+	commitHash string,
+	configFileRelPath string,
+	componentName string,
+) (string, error) {
+	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
+	if err != nil {
+		return "", fmt.Errorf("resolving commit %#q:\n%w", commitHash, err)
+	}
+
+	tree, err := commit.Tree()
+	if err != nil {
+		return "", fmt.Errorf("reading commit tree:\n%w", err)
+	}
+
+	file, err := tree.File(configFileRelPath)
+	if err != nil {
+		return "", fmt.Errorf("reading config file %#q:\n%w", configFileRelPath, err)
+	}
+
+	content, err := file.Contents()
+	if err != nil {
+		return "", fmt.Errorf("reading config contents %#q:\n%w", configFileRelPath, err)
+	}
+
+	var config projectconfig.ConfigFile
+	if err := toml.Unmarshal([]byte(content), &config); err != nil {
+		return "", fmt.Errorf("parsing config file:\n%w", err)
+	}
+
+	component, ok := config.Components[componentName]
+	if !ok {
+		return "", fmt.Errorf("config file does not define component %#q", componentName)
+	}
+
+	return component.Spec.UpstreamCommit, nil
 }
 
 // CommitInterleavedHistory rebuilds the dist-git history by interleaving
@@ -128,14 +168,14 @@ func FindLockChanges(
 // last synthetic commit carries the overlay file changes; all others are empty.
 func CommitInterleavedHistory(
 	repo *gogit.Repository,
-	changes []LockChange,
+	changes []UpstreamCommitChange,
 ) error {
 	// No changes means no synthetic commits to create, so skip the whole process.
 	if len(changes) == 0 {
 		return nil
 	}
 
-	// The latest lock change's UpstreamCommit is the commit we're
+	// The latest configured upstream commit is the commit we're
 	// pinned to — use it as the upper bound for the upstream walk instead
 	// of HEAD, which may be ahead (e.g., at the branch tip).
 	upstreamCommit := changes[len(changes)-1].UpstreamCommit
@@ -197,11 +237,11 @@ func stageAndCaptureOverlayTree(repo *gogit.Repository) (plumbing.Hash, error) {
 // history are dropped with a warning.
 func buildInterleavedSequence(
 	upstreamCommits []*object.Commit,
-	changes []LockChange,
+	changes []UpstreamCommitChange,
 ) []interleavedEntry {
 	latestUpstream := changes[len(changes)-1].UpstreamCommit
 
-	var interleaved, top []LockChange
+	var interleaved, top []UpstreamCommitChange
 
 	for idx := range changes {
 		switch changes[idx].UpstreamCommit {
@@ -217,7 +257,7 @@ func buildInterleavedSequence(
 	}
 
 	// Build a lookup from upstream-commit hash → synthetic commits.
-	interleavedByUpstream := make(map[string][]LockChange)
+	interleavedByUpstream := make(map[string][]UpstreamCommitChange)
 
 	for i := range interleaved {
 		hash := interleaved[i].UpstreamCommit
@@ -244,7 +284,7 @@ func buildInterleavedSequence(
 	// Remaining interleaved changes reference upstream commits not found in
 	// the dist-git history — drop them with a warning. Will be useful for when we switch branches.
 	for hash, orphaned := range interleavedByUpstream {
-		slog.Warn("Upstream commit referenced by lock change not found in dist-git history; "+
+		slog.Warn("Upstream commit referenced by generated config change not found in dist-git history; "+
 			"dropping",
 			"upstreamCommit", hash,
 			"count", len(orphaned))
@@ -351,11 +391,11 @@ func replayUpstreamCommit(
 	return hash, nil
 }
 
-// createSyntheticCommit creates a synthetic commit from a [LockChange],
+// createSyntheticCommit creates a synthetic commit from an [UpstreamCommitChange],
 // logging progress information.
 func createSyntheticCommit(
 	repo *gogit.Repository,
-	change *LockChange,
+	change *UpstreamCommitChange,
 	treeHash, parentHash plumbing.Hash,
 	syntheticIdx, syntheticCount int,
 ) (plumbing.Hash, error) {
@@ -448,18 +488,13 @@ func updateHead(repo *gogit.Repository, commitHash plumbing.Hash) error {
 }
 
 // buildSyntheticCommits resolves the project repository from the component's
-// config file, walks the lock file's git history, and returns matching
-// [LockChange] entries sorted chronologically.
-//
-// The lockDir is the absolute path to the lock file directory. It is converted
-// to a repo-relative path internally once the git repository root is known.
+// generated config file and returns its upstream-commit changes chronologically.
 func buildSyntheticCommits(
 	ctx context.Context,
 	cmdFactory opctx.CmdFactory,
 	config *projectconfig.ComponentConfig,
 	componentName string,
-	lockDir string,
-) ([]LockChange, error) {
+) ([]UpstreamCommitChange, error) {
 	projectRepo, projectRepoDir, err := openProjectRepo(config, componentName)
 	if err != nil {
 		return nil, err
@@ -469,54 +504,43 @@ func buildSyntheticCommits(
 		return nil, nil
 	}
 
-	// Compute the lock file path relative to the git repository root.
-	lockFileAbsPath, err := lockfile.LockPath(lockDir, componentName)
+	configFileAbsPath := config.UpstreamCommitConfigFile().SourcePath()
+
+	configFileRelPath, err := filepath.Rel(projectRepoDir, configFileAbsPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolving lock file path for %#q:\n%w", componentName, err)
+		return nil, fmt.Errorf("failed to compute repo-relative config path for %#q:\n%w",
+			configFileAbsPath, err)
 	}
 
-	lockFileRelPath, err := filepath.Rel(projectRepoDir, lockFileAbsPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute repo-relative lock path for %#q:\n%w",
-			lockFileAbsPath, err)
-	}
-
-	// Read the lock file at HEAD. If the file is missing (not yet committed),
-	// synthetic history is skipped.
-	headLock, err := readLockFileAtHEAD(projectRepo, lockFileRelPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if headLock == nil {
+	if config.Spec.UpstreamCommit == "" {
 		return nil, nil
 	}
 
-	lockChanges, err := FindLockChanges(ctx, cmdFactory, projectRepo, projectRepoDir, lockFileRelPath)
+	changes, err := FindUpstreamCommitChanges(
+		ctx, cmdFactory, projectRepo, projectRepoDir, configFileRelPath, componentName,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find changes for lock file %#q:\n%w",
-			lockFileRelPath, err)
+		return nil, fmt.Errorf("failed to find upstream commit changes for config file %#q:\n%w",
+			configFileRelPath, err)
 	}
 
-	// In a shallow clone the commit that added the lock file may have been
-	// pruned. Detect this before falling through to dirty detection.
-	if len(lockChanges) == 0 {
+	if len(changes) == 0 {
 		shallowCommits, _ := projectRepo.Storer.Shallow()
 		if len(shallowCommits) > 0 {
 			return nil, fmt.Errorf(
-				"lock file %#q has no git history; a full clone is required",
-				lockFileRelPath)
+				"upstream commit TOML %#q has no git history; a full clone is required",
+				configFileRelPath)
 		}
 	}
 
-	if len(lockChanges) == 0 {
-		slog.Warn("Lock file has no changes; skipping synthetic history",
-			"lockFile", lockFileRelPath)
+	if len(changes) == 0 {
+		slog.Warn("Upstream commit TOML has no changes; skipping synthetic history",
+			"configFile", configFileRelPath)
 
 		return nil, nil
 	}
 
-	return lockChanges, nil
+	return changes, nil
 }
 
 // openProjectRepo opens the git repository that contains the component's
@@ -527,14 +551,15 @@ func openProjectRepo(
 	config *projectconfig.ComponentConfig,
 	componentName string,
 ) (*gogit.Repository, string, error) {
-	if config.SourceConfigFile == nil || config.SourceConfigFile.SourcePath() == "" {
+	upstreamCommitConfigFile := config.UpstreamCommitConfigFile()
+	if upstreamCommitConfigFile == nil || upstreamCommitConfigFile.SourcePath() == "" {
 		slog.Debug("Cannot resolve config file for synthetic commits; skipping",
 			"component", componentName)
 
 		return nil, "", nil
 	}
 
-	configFilePath := config.SourceConfigFile.SourcePath()
+	configFilePath := upstreamCommitConfigFile.SourcePath()
 
 	repo, err := git.OpenProjectRepo(filepath.Dir(configFilePath))
 	if err != nil {
@@ -550,45 +575,6 @@ func openProjectRepo(
 	return repo, worktree.Filesystem.Root(), nil
 }
 
-// readLockFileAtHEAD reads the lock file at the repository's HEAD commit.
-// Returns nil (without error) when the lock file or its parent directory does
-// not exist in the commit tree — this is the normal case for components that
-// have never had overlays. Returns a non-nil error for real failures (TOML
-// parse errors, unexpected git object errors, etc.).
-func readLockFileAtHEAD(
-	repo *gogit.Repository,
-	lockFileRelPath string,
-) (*lockfile.ComponentLock, error) {
-	head, err := repo.Head()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get HEAD:\n%w", err)
-	}
-
-	headLock, lockFileErr := lockfile.ShowAtCommit(repo, head.Hash().String(), lockFileRelPath)
-	if lockFileErr == nil {
-		return &headLock, nil
-	}
-
-	// Tolerate both file-not-found and directory-not-found — the latter
-	// occurs when the locks directory has never been created in the repo.
-	if !errors.Is(lockFileErr, object.ErrFileNotFound) &&
-		!errors.Is(lockFileErr, object.ErrDirectoryNotFound) {
-		return nil, fmt.Errorf("failed to read lock file %#q at HEAD:\n%w",
-			lockFileRelPath, lockFileErr)
-	}
-
-	// File genuinely missing — no committed lock at HEAD. This is normal
-	// for local components (no upstream commit) and for upstream components
-	// whose lock was created on disk but not yet committed to git.
-	// Note: the resolver validates lock existence on the *filesystem* (working
-	// tree), not in git — so a lock written by 'component update' but not
-	// yet committed passes resolver validation but is absent at HEAD.
-	slog.Debug("No lock file found at HEAD; skipping synthetic history",
-		"lockFile", lockFileRelPath, "reason", lockFileErr)
-
-	return nil, nil //nolint:nilnil // nil,nil signals "not found, skip" to caller.
-}
-
 // collectUpstreamCommits returns commits in the repository in chronological
 // order (oldest first), ending at upstreamCommit. Only first-parent links are
 // followed so that merge commits are included but side-branch commits are
@@ -602,11 +588,11 @@ func collectUpstreamCommits(
 	}
 
 	// Walk newest-first following only first parents. Start collecting at
-	// upstreamCommit and continue to the root commit. The lock no longer stores
-	// a separate import boundary, so the repository's first-parent root is the
-	// only durable beginning of the history. This keeps reconstruction derived
-	// from Git itself instead of preserving a second, potentially stale fork
-	// point in component state.
+	// upstreamCommit and continue to the root commit. No separate import
+	// boundary is persisted, so the repository's first-parent root is the only
+	// durable beginning of the history. This keeps reconstruction derived from
+	// Git itself instead of preserving a second, potentially stale fork point
+	// in component state.
 	var (
 		commits       []*object.Commit
 		foundUpstream bool
@@ -646,7 +632,7 @@ func collectUpstreamCommits(
 	if upstreamCommit != "" && !foundUpstream {
 		return nil, fmt.Errorf(
 			"upstream-commit %#q not found in dist-git history; "+
-				"the lock file may reference a commit from a different branch",
+				"the component config may reference a commit from a different branch",
 			upstreamCommit)
 	}
 

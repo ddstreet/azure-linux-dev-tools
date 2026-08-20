@@ -10,7 +10,7 @@ Report three independent change-activity signals per component:
 
   - toml-commits:    commits to the component's source TOML file
   - customizations:  count of explicit customization items in the config
-  - lock-changes:    commits that changed the component's lock file
+  - upstream-commit-changes: commits that changed the generated upstream-commit TOML
 
 Use this to find which packages get the most attention (for documentation,
 review prioritization, or refactoring planning).

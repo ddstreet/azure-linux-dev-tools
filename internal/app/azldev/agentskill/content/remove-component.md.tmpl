@@ -8,7 +8,7 @@ description: {{ printf "%q" .Description }}
 There is **no `azldev` command to remove a component** — it is a manual edit. A
 deletion-only change needs no package build, but changes to dependents, package/image
 configuration, or other built inputs must follow the repository's normal validation
-requirements. The steps below delete the component's definition, lock, and rendered
+requirements. The steps below delete the component's definition, generated commit config, and rendered
 spec, then clean up references.
 
 ## Before you start
@@ -35,10 +35,10 @@ spec source.
    publish channels or package groups, drop any references to the component or to
    its binary subpackages. Publishing is component-scoped; per-binary exceptions
    are binary-RPM-scoped — search for both.
-3. **Remove the lock.** There is no azldev command for this:
+3. **Remove the generated upstream commit config.** There is no targeted azldev command for this:
 
    ```sh
-   rm {{ .LockDir }}/<name>.lock
+   rm {{ .UpstreamCommitsDir }}/<name>.toml
    ```
 
 4. **Remove the rendered spec.** Let azldev prune orphaned spec directories:
@@ -61,7 +61,7 @@ spec source.
 azldev comp list -p <name> -q -O json   # should report the component is not found
 ```
 
-Also confirm the lock and rendered spec directory are gone and that no image or
+Also confirm the generated commit config and rendered spec directory are gone and that no image or
 package configuration still references the component.
 
 If the removal required changes to dependents or package/image configuration, build

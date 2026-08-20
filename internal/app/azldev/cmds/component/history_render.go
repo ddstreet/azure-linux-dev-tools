@@ -13,9 +13,9 @@ import (
 )
 
 // sortHistoryResults orders results "most-customized first": highest
-// customization count first, then lock-changes, then alphabetical by name.
+// customization count first, then upstream-commit changes, then name.
 // Customizations is the most direct signal of human attention paid to a
-// component (and it's deterministic / fast); lock-changes and the name
+// component (and it's deterministic / fast); upstream-commit changes and the name
 // tie-break it for stable output.
 func sortHistoryResults(results []HistoryResult) {
 	sort.SliceStable(results, func(left, right int) bool {
@@ -23,8 +23,8 @@ func sortHistoryResults(results []HistoryResult) {
 			return results[left].Customizations > results[right].Customizations
 		}
 
-		if results[left].LockChanges != results[right].LockChanges {
-			return results[left].LockChanges > results[right].LockChanges
+		if results[left].UpstreamCommitChanges != results[right].UpstreamCommitChanges {
+			return results[left].UpstreamCommitChanges > results[right].UpstreamCommitChanges
 		}
 
 		return results[left].Name < results[right].Name
@@ -78,19 +78,13 @@ func renderCardView(writer io.Writer, result HistoryResult) {
 
 	fmt.Fprintf(writer, "  TOML commits:   %d%s%s\n", result.TomlCommits, sharedNote, latestNote)
 	fmt.Fprintf(writer, "  Customizations: %d\n", result.Customizations)
-	fmt.Fprintf(writer, "  Lock changes:   %d\n", result.LockChanges)
+	fmt.Fprintf(writer, "  Commit changes: %d\n", result.UpstreamCommitChanges)
 
-	// The per-commit LockChangeDetails are populated for a single
+	// The per-commit details are populated for a single
 	// surviving component but omitted from the card to keep it scannable;
 	// point the user at -O json so the changelog records aren't a dead end.
-	if result.LockChanges > 0 {
+	if result.UpstreamCommitChanges > 0 {
 		fmt.Fprintln(writer, "                  (run with -O json for per-commit details)")
-	}
-
-	if result.HasLock {
-		fmt.Fprintln(writer, "  Lock state:     locked")
-	} else {
-		fmt.Fprintln(writer, "  Lock state:     no lock")
 	}
 
 	if len(result.Warnings) > 0 {

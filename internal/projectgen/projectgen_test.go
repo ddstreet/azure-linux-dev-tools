@@ -45,7 +45,6 @@ func requireProjectHasValidDefaultConfig(t *testing.T, ctx opctx.Ctx, projectPat
 	assert.NotEmpty(t, config.Project.LogDir)
 	assert.NotEmpty(t, config.Project.WorkDir)
 	assert.NotEmpty(t, config.Project.OutputDir)
-	assert.NotEmpty(t, config.Project.LockDir)
 	assert.NotEmpty(t, config.Project.RenderedSpecsDir)
 }
 

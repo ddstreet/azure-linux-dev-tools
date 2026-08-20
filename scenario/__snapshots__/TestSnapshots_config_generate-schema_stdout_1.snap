@@ -992,12 +992,6 @@
             "SPECS"
           ]
         },
-        "lock-dir": {
-          "type": "string",
-          "title": "Lock Directory",
-          "description": "Directory for per-component lock files",
-          "default": "locks"
-        },
         "default-distro": {
           "$ref": "#/$defs/DistroReference",
           "title": "Default Distro",

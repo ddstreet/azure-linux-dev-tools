@@ -79,6 +79,13 @@ func gitInDir(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func upstreamCommitConfig(name, commit string) string {
+	return fmt.Sprintf(
+		"%s\n[components.%s.spec]\ntype = \"upstream\"\nupstream-commit = %q\n",
+		projectconfig.GeneratedUpstreamCommitMarker, name, commit,
+	)
+}
+
 // writeFileInDir creates a file at relPath under dir with the given content.
 func writeFileInDir(t *testing.T, dir, relPath, content string) {
 	t.Helper()
@@ -95,8 +102,8 @@ func writeFileInDir(t *testing.T, dir, relPath, content string) {
 // Flow:
 //  1. Create a project with two local components (curl, bash) and a minimal
 //     distro config patched in for local (non-container) execution.
-//  2. Commit initial lock files for both components with distinct upstream commits.
-//  3. In a second commit, update only curl's lock file.
+//  2. Commit initial upstream commit TOMLs for both components with distinct commits.
+//  3. In a second commit, update only curl's generated TOML.
 //  4. Run `azldev component changed --from <commit1> -a --include-unchanged`
 //     to compare the two commits with JSON output.
 //  5. Assert curl is reported as "changed" (upstream commit differs between refs)
@@ -151,28 +158,28 @@ func TestComponentChanged_E2E(t *testing.T) {
 	project.Serialize(t, projectDir)
 	patchProjectForLocal(t, projectDir)
 
-	// Step 2: Initialize git repo. Create lock files for both components
+	// Step 2: Initialize git repo. Create upstream commit TOMLs for both components
 	// with version 1 upstream commits, then commit everything as the baseline.
 	gitInDir(t, projectDir, "init")
 	gitInDir(t, projectDir, "config", "user.email", "test@test.com")
 	gitInDir(t, projectDir, "config", "user.name", "Test")
 
-	lockV1Curl := fmt.Sprintf("upstream-commit = %q\n", "curl-v1")
-	lockV1Bash := fmt.Sprintf("upstream-commit = %q\n", "bash-v1")
+	commitV1Curl := upstreamCommitConfig("curl", "curl-v1")
+	commitV1Bash := upstreamCommitConfig("bash", "bash-v1")
 
-	writeFileInDir(t, projectDir, "locks/curl.lock", lockV1Curl)
-	writeFileInDir(t, projectDir, "locks/bash.lock", lockV1Bash)
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml", commitV1Curl)
+	writeFileInDir(t, projectDir, "base/upstream-commits/bash.toml", commitV1Bash)
 
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Second commit: change curl's lock, leave bash unchanged.
-	lockV2Curl := fmt.Sprintf("upstream-commit = %q\n", "curl-v2")
-	writeFileInDir(t, projectDir, "locks/curl.lock", lockV2Curl)
+	// Second commit: change curl's commit TOML, leave bash unchanged.
+	commitV2Curl := upstreamCommitConfig("curl", "curl-v2")
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml", commitV2Curl)
 
-	gitInDir(t, projectDir, "add", "locks/curl.lock")
+	gitInDir(t, projectDir, "add", "base/upstream-commits/curl.toml")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "update curl")
 
 	// Run: all components, include unchanged.
@@ -243,8 +250,8 @@ func TestComponentChanged_SameRef(t *testing.T) {
 	gitInDir(t, projectDir, "config", "user.email", "test@test.com")
 	gitInDir(t, projectDir, "config", "user.name", "Test")
 
-	lockContent := fmt.Sprintf("upstream-commit = %q\n", "v1")
-	writeFileInDir(t, projectDir, "locks/curl.lock", lockContent)
+	commitConfig := upstreamCommitConfig("curl", "v1")
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml", commitConfig)
 
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
@@ -354,10 +361,10 @@ func setupProjectWithGit(
 //
 // Flow:
 //  1. Create a project with one component (curl) and a rendered-specs-dir.
-//  2. Commit initial lock + sources file.
+//  2. Commit initial upstream commit TOML + sources file.
 //  3. In a second commit, update the upstream commit AND the sources file.
 //  4. Assert changeType="changed" and sourcesChange="true".
-//  5. In a third commit, update only the lock (not sources).
+//  5. In a third commit, update only the commit TOML (not sources).
 //  6. Compare commit 2→3: assert changeType="changed", sourcesChange="false"
 //     (rebuild needed but no tarball re-upload).
 func TestComponentChanged_SourcesChange(t *testing.T) {
@@ -386,9 +393,9 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 		nil,
 	)
 
-	// Commit 1: initial lock + rendered sources.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "v1"))
+	// Commit 1: initial commit TOML + rendered sources.
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.0.tar.gz) = aaa111")
 	gitInDir(t, projectDir, "add", ".")
@@ -396,8 +403,8 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 	ref1 := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Commit 2: change upstream commit AND sources (new tarball).
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "v2"))
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "v2"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.1.tar.gz) = bbb222")
 	gitInDir(t, projectDir, "add", ".")
@@ -405,8 +412,8 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 	ref2 := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Commit 3: change upstream commit only (same tarball).
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "v3"))
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "v3"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "config change")
 
@@ -429,7 +436,7 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 // produces correct results in the reverse direction.
 //
 // Flow:
-//  1. Create a project with one component, commit two versions of its lock.
+//  1. Create a project with one component, commit two versions of its upstream commit TOML.
 //  2. Compare forward (old→new): changeType="changed".
 //  3. Compare backward (new→old): also changeType="changed" (upstream commit
 //     still differs, just in the other direction).
@@ -459,16 +466,16 @@ func TestComponentChanged_InvertedRefs(t *testing.T) {
 		nil,
 	)
 
-	// Commit 1: v1 lock.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "old"))
+	// Commit 1: v1 commit TOML.
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "old"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "v1")
 	oldRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 2: v2 lock.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "new"))
+	// Commit 2: v2 commit TOML.
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "new"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "v2")
 	newRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
@@ -486,12 +493,12 @@ func TestComponentChanged_InvertedRefs(t *testing.T) {
 	assert.Equal(t, "changed", rm["curl"].ChangeType, "backward: upstream commit still differs")
 }
 
-// TestComponentChanged_NewComponent verifies that a component whose lock file
+// TestComponentChanged_NewComponent verifies that a component whose upstream commit TOML
 // appears between the two refs is reported as "added".
 //
 // Flow:
-//  1. Commit with no lock files.
-//  2. Add a lock file for curl.
+//  1. Commit with no generated commit files.
+//  2. Add an upstream commit TOML for curl.
 //  3. Compare: curl should be "added".
 func TestComponentChanged_NewComponent(t *testing.T) {
 	t.Parallel()
@@ -519,30 +526,30 @@ func TestComponentChanged_NewComponent(t *testing.T) {
 		nil,
 	)
 
-	// Commit 1: no lock files, just a placeholder.
+	// Commit 1: no generated commit files, just a placeholder.
 	writeFileInDir(t, projectDir, "placeholder", "x")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "empty")
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 2: add curl lock.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "first"))
+	// Commit 2: add curl commit TOML.
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "first"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "add curl")
 
 	results := runChanged(t, azldevBin, projectDir, "--from", fromRef, "-a")
 	rm := resultMap(results)
 	require.Contains(t, rm, "curl")
-	assert.Equal(t, "added", rm["curl"].ChangeType, "new lock file should be reported as added")
+	assert.Equal(t, "added", rm["curl"].ChangeType, "new commit TOML should be reported as added")
 }
 
 // TestComponentChanged_DeletedComponent verifies that a non-config component
-// whose lock existed at --from but not at --to is reported as "deleted".
+// whose generated commit existed at --from but not at --to is reported as "deleted".
 //
 // Flow:
-//  1. Commit lock files for curl (in config) and oldpkg (NOT in config).
-//  2. Remove oldpkg's lock file in a second commit.
+//  1. Commit generated TOMLs for curl (in config) and oldpkg (NOT in config).
+//  2. Remove oldpkg's generated TOML in a second commit.
 //  3. Compare with -a: oldpkg should appear as "deleted".
 func TestComponentChanged_DeletedComponent(t *testing.T) {
 	t.Parallel()
@@ -570,17 +577,17 @@ func TestComponentChanged_DeletedComponent(t *testing.T) {
 		nil,
 	)
 
-	// Commit 1: lock files for curl (in config) and oldpkg (NOT in config).
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "curl-v1"))
-	writeFileInDir(t, projectDir, "locks/oldpkg.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "oldpkg-v1"))
+	// Commit 1: generated TOMLs for curl (in config) and oldpkg (NOT in config).
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "curl-v1"))
+	writeFileInDir(t, projectDir, "base/upstream-commits/oldpkg.toml",
+		upstreamCommitConfig("oldpkg", "oldpkg-v1"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 2: remove oldpkg's lock file.
-	gitInDir(t, projectDir, "rm", "locks/oldpkg.lock")
+	// Commit 2: remove oldpkg's generated TOML.
+	gitInDir(t, projectDir, "rm", "base/upstream-commits/oldpkg.toml")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "remove oldpkg")
 
 	// Compare with -a to enable non-config component detection.
@@ -588,9 +595,9 @@ func TestComponentChanged_DeletedComponent(t *testing.T) {
 	rm := resultMap(results)
 
 	// curl should be unchanged (same upstream commit).
-	// oldpkg (not in config, lock removed) should be "deleted".
+	// oldpkg (not in config, generated TOML removed) should be "deleted".
 	require.Contains(t, rm, "oldpkg", "deleted non-config component should appear in results")
-	assert.Equal(t, "deleted", rm["oldpkg"].ChangeType, "removed lock for non-config component")
+	assert.Equal(t, "deleted", rm["oldpkg"].ChangeType, "removed commit TOML for non-config component")
 }
 
 // TestComponentChanged_JSONContract validates the JSON output schema is stable
@@ -642,13 +649,13 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 		nil,
 	)
 
-	// Commit 1: curl has lock + sources, bash has lock, oldpkg has lock (not in config).
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "curl-v1"))
-	writeFileInDir(t, projectDir, "locks/bash.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "bash-v1"))
-	writeFileInDir(t, projectDir, "locks/oldpkg.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "old-v1"))
+	// Commit 1: curl has commit TOML + sources; bash and oldpkg have commit TOMLs.
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "curl-v1"))
+	writeFileInDir(t, projectDir, "base/upstream-commits/bash.toml",
+		upstreamCommitConfig("bash", "bash-v1"))
+	writeFileInDir(t, projectDir, "base/upstream-commits/oldpkg.toml",
+		upstreamCommitConfig("oldpkg", "old-v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-1.0.tar.gz) = aaa")
 	gitInDir(t, projectDir, "add", ".")
@@ -656,11 +663,11 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Commit 2: curl upstream commit + sources changed, bash unchanged, oldpkg removed.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "curl-v2"))
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "curl-v2"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-2.0.tar.gz) = bbb")
-	gitInDir(t, projectDir, "rm", "locks/oldpkg.lock")
+	gitInDir(t, projectDir, "rm", "base/upstream-commits/oldpkg.toml")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "update")
 
@@ -698,7 +705,7 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 	// Expected states:
 	//   curl:   changed  + sourcesChange=true  (both upstream commit and sources differ)
 	//   bash:   unchanged + sourcesChange=false (identical at both refs)
-	//   oldpkg: deleted  + sourcesChange=true   (non-config, lock removed)
+	//   oldpkg: deleted  + sourcesChange=true   (non-config, commit TOML removed)
 	validChangeTypes := map[string]bool{
 		"added": true, "changed": true, "unchanged": true, "deleted": true,
 	}
@@ -749,9 +756,9 @@ func TestComponentChanged_SourcesOnlyChange(t *testing.T) {
 		nil,
 	)
 
-	// Commit 1: lock + matching rendered sources.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("upstream-commit = %q\n", "v1"))
+	// Commit 1: commit TOML + matching rendered sources.
+	writeFileInDir(t, projectDir, "base/upstream-commits/curl.toml",
+		upstreamCommitConfig("curl", "v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.0.tar.gz) = aaa111")
 	gitInDir(t, projectDir, "add", ".")

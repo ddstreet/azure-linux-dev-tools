@@ -19,7 +19,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders/fedorasource"
@@ -64,16 +63,11 @@ type PreparerOption func(*sourcePreparerImpl)
 // requires the project configuration to reside inside a git repository.
 // Without this option, no dist-git is created and synthetic history is skipped.
 //
-// The cmdFactory is used to shell out to git for lock history detection.
-// The lockReader provides access to per-component lock files and their directory.
-func WithGitRepo(
-	cmdFactory opctx.CmdFactory,
-	lockReader lockfile.LockReader,
-) PreparerOption {
+// The cmdFactory is used to shell out to git for upstream-commit history detection.
+func WithGitRepo(cmdFactory opctx.CmdFactory) PreparerOption {
 	return func(p *sourcePreparerImpl) {
 		p.withGitRepo = true
 		p.cmdFactory = cmdFactory
-		p.lockReader = lockReader
 	}
 }
 
@@ -147,13 +141,9 @@ type sourcePreparerImpl struct {
 	// source preparation. Git-tracked files are still fetched.
 	skipLookaside bool
 
-	// cmdFactory is used to shell out to git for lock history detection
+	// cmdFactory is used to shell out to git for upstream-commit history detection
 	// in the project repository. Set via [WithGitRepo].
 	cmdFactory opctx.CmdFactory
-
-	// lockReader provides access to per-component lock files and their
-	// directory path. Set via [WithGitRepo].
-	lockReader lockfile.LockReader
 
 	// allowNoHashes, when true, allows source file references without hash
 	// values. Missing hashes are computed from the downloaded files.
@@ -448,8 +438,8 @@ func initSourcesRepo(sourcesDirPath string) (*gogit.Repository, error) {
 }
 
 // trySyntheticHistory attempts to create synthetic git commits on top of the
-// component's sources directory. Synthetic commits are derived from lock file
-// changes in the project repository and interleaved into the
+// component's sources directory. Synthetic commits are derived from generated
+// upstream-commit TOML changes in the project repository and interleaved into the
 // upstream dist-git history. If no .git directory exists, one is initialized
 // with an initial commit so synthetic commits can be layered on uniformly.
 //
@@ -462,9 +452,7 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 	config := component.GetConfig()
 	componentName := component.GetName()
 
-	changes, err := buildSyntheticCommits(
-		ctx, p.cmdFactory, config, componentName, p.lockReader.LockDir(),
-	)
+	changes, err := buildSyntheticCommits(ctx, p.cmdFactory, config, componentName)
 	if err != nil {
 		return fmt.Errorf("failed to build synthetic commits:\n%w", err)
 	}

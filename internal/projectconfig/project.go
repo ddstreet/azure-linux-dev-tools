@@ -292,7 +292,6 @@ const (
 	DefaultLogDir           = "build/logs"
 	DefaultWorkDir          = "build/work"
 	DefaultOutputDir        = "out"
-	DefaultLockDir          = "locks"
 	DefaultRenderedSpecsDir = "specs"
 )
 
@@ -310,9 +309,6 @@ type ProjectInfo struct {
 
 	// Path to the output directory for rendered specs (component render).
 	RenderedSpecsDir string `toml:"rendered-specs-dir,omitempty" json:"renderedSpecsDir,omitempty" jsonschema:"title=Rendered Specs Directory,description=Output directory for rendered specs,example=SPECS"`
-
-	// Path to the directory for per-component lock files.
-	LockDir string `toml:"lock-dir,omitempty" json:"lockDir,omitempty" jsonschema:"title=Lock Directory,description=Directory for per-component lock files,default=locks"`
 
 	// Default-selected distro. May be overridden at runtime.
 	DefaultDistro DistroReference `toml:"default-distro,omitempty" json:"defaultDistro,omitempty" jsonschema:"title=Default Distro,description=Default selected distro reference"`
@@ -346,7 +342,6 @@ func (p *ProjectInfo) WithAbsolutePaths(referenceDir string) *ProjectInfo {
 	result.WorkDir = makeAbsolute(referenceDir, result.WorkDir)
 	result.OutputDir = makeAbsolute(referenceDir, result.OutputDir)
 	result.RenderedSpecsDir = makeAbsolute(referenceDir, result.RenderedSpecsDir)
-	result.LockDir = makeAbsolute(referenceDir, result.LockDir)
 
 	return result
 }
@@ -362,7 +357,6 @@ func (p *ProjectInfo) ApplyProjectDefaults(projectDir string) {
 	setIfEmpty(&p.LogDir, projectDir, DefaultLogDir)
 	setIfEmpty(&p.WorkDir, projectDir, DefaultWorkDir)
 	setIfEmpty(&p.OutputDir, projectDir, DefaultOutputDir)
-	setIfEmpty(&p.LockDir, projectDir, DefaultLockDir)
 	setIfEmpty(&p.RenderedSpecsDir, projectDir, DefaultRenderedSpecsDir)
 }
 

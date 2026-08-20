@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/mattn/go-isatty"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 )
 
@@ -94,10 +93,6 @@ type Env struct {
 	// Fix suggestion: a list of human readable hints that will be printed after an error to help the user
 	// resolve the issue. Printed in FIFO order.
 	fixSuggestions *fixSuggestionState
-
-	// lockStore provides cached access to per-component lock files.
-	// Nil when no project directory is configured.
-	lockStore *lockfile.Store
 }
 
 type fixSuggestionState struct {
@@ -173,9 +168,6 @@ func NewEnv(ctx context.Context, options EnvOptions) *Env {
 
 		// No fix suggestions to start.
 		fixSuggestions: &fixSuggestionState{},
-
-		// Lock store: created when we have a project directory.
-		lockStore: newLockStore(options.ProjectDir, options.Config, options.Interfaces.FileSystemFactory),
 	}
 }
 
@@ -364,39 +356,6 @@ func (env *Env) PrintFixSuggestions() {
 	}
 
 	slog.Warn(boxEdgeString)
-}
-
-// LockStore returns the full lock store (read + write) for this environment.
-// Use this only in commands that write lock files (e.g., component update).
-// Returns nil if no project directory is configured.
-func (env *Env) LockStore() *lockfile.Store {
-	return env.lockStore
-}
-
-// LockReader returns read-only access to lock files. Use this for commands
-// that consume lock state but should not modify it (e.g., render, build).
-// Returns nil if no project directory is configured.
-func (env *Env) LockReader() lockfile.LockReader {
-	if env.lockStore == nil {
-		return nil
-	}
-
-	return env.lockStore
-}
-
-// newLockStore creates a lock store from the project config's lock-dir.
-// Returns nil when the project directory, filesystem, or config is unavailable,
-// or when the config's lock-dir is empty.
-func newLockStore(
-	projectDir string,
-	config *projectconfig.ProjectConfig,
-	fsFactory opctx.FileSystemFactory,
-) *lockfile.Store {
-	if projectDir == "" || fsFactory == nil || config == nil || config.Project.LockDir == "" {
-		return nil
-	}
-
-	return lockfile.NewStore(fsFactory.FS(), config.Project.LockDir)
 }
 
 // CPUBoundConcurrency returns the recommended concurrency limit for CPU-bound tasks.

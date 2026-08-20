@@ -6,18 +6,17 @@ Detect which components changed between two git refs
 
 ### Synopsis
 
-Compare component lock files and rendered sources between two git refs to
+Compare generated upstream-commit TOMLs and rendered sources between two git refs to
 determine which components changed. For each component, reports whether its
 resolved upstream commit changed and whether its rendered sources file changed.
 
 This is useful for CI/CD pipelines to determine which components need to be
 rebuilt or have their lookaside tarballs re-uploaded after a PR merge.
 
-Note: component selection and directory paths (lock-dir, rendered-specs-dir)
+Note: component selection and directory paths
 are resolved from the current checkout's configuration, not from the compared
 refs. For accurate results, run this command from a checkout that matches the
---to ref (e.g., after merging a PR). Components not in the current config are
-detected via lock file presence in the compared refs when using -a.
+--to ref (e.g., after merging a PR).
 
 ```
 azldev component changed [flags]
@@ -50,6 +49,7 @@ azldev component changed [flags]
       --include-unchanged             Include unchanged components in output (only applies to broad -a scans; explicit selections always show status)
   -s, --spec-path stringArray         Spec path
       --to string                     Git ref to compare to (default "HEAD")
+      --upstream-commits-dir string   directory containing generated upstream-commit TOML files (default "base/upstream-commits")
 ```
 
 ### Options inherited from parent commands

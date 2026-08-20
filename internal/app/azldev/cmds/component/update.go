@@ -8,13 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
+	"github.com/microsoft/azure-linux-dev-tools/internal/upstreamcommit"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/parmap"
 	"github.com/spf13/cobra"
 )
@@ -22,13 +23,15 @@ import (
 // UpdateComponentOptions holds options for the component update command.
 type UpdateComponentOptions struct {
 	ComponentFilter components.ComponentFilter
-	// CheckOnly resolves upstream commits but does not write lock files or
-	// prune orphans. Returns a non-nil error when any component would change
-	// or any lock file would be pruned. Intended for CI gates:
-	// `azldev component update -a --check-only` exits 0 when locks are
-	// fresh and 1 when something is stale.
+	// UpstreamCommitsDir is the project-relative or absolute directory containing
+	// generated per-component TOML files.
+	UpstreamCommitsDir string
+	// CheckOnly resolves upstream commits but does not write TOML files or
+	// prune orphans.
 	CheckOnly bool
 }
+
+const defaultUpstreamCommitsDir = "base/upstream-commits"
 
 func updateOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
 	parentCmd.AddCommand(NewUpdateCmd())
@@ -37,25 +40,27 @@ func updateOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
 // NewUpdateCmd constructs a [cobra.Command] for the "component update" CLI subcommand.
 func NewUpdateCmd() *cobra.Command {
 	options := &UpdateComponentOptions{}
+	options.UpstreamCommitsDir = defaultUpstreamCommitsDir
 
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Resolve and lock source identities for components",
-		Long: `Resolve upstream commits for components and write them to per-component lock files.
+		Short: "Resolve and record upstream commits for components",
+		Long: `Resolve upstream commits for components and write normal per-component TOML configuration.
 
 For upstream components, this resolves the effective commit hash using the
-distro snapshot time or explicit pin, then records it in locks/<name>.lock.
-Subsequent commands (render, build) use the locked state for deterministic,
-reproducible results.
+distro snapshot time, then records it as spec.upstream-commit in
+base/upstream-commits/<name>.toml by default. Include that directory's TOML
+files from the project configuration so subsequent commands use the resolved
+commit for deterministic, reproducible results.
 
-When updating all components (-a), orphan lock files (locks for components
-that no longer exist in the project config) are automatically pruned.
+When updating all components (-a), orphan generated TOML files are
+automatically pruned.
 Orphan pruning is skipped when updating individual components to avoid
-accidentally removing lock files for components not included in the filter.
+accidentally removing files for components not included in the filter.
 
-The --check-only flag runs the full pipeline but does NOT write lock files or
+The --check-only flag runs the full pipeline but does NOT write TOML files or
 prune orphans. The command exits 0 when nothing would change and exits 1 when
-any component is stale or any lock would be pruned. Intended for CI gates.`,
+any component is stale or any generated TOML would be pruned. Intended for CI gates.`,
 		Example: `  # Update all components
   azldev component update -a
 
@@ -65,7 +70,10 @@ any component is stale or any lock would be pruned. Intended for CI gates.`,
   # Update components in a group
   azldev component update -g core
 
-  # CI gate: exit 0 if locks are fresh, 1 if anything would change
+  # Write generated files to a custom directory
+  azldev component update -a --upstream-commits-dir config/commits
+
+  # CI gate: exit 0 if commit TOMLs are current, 1 if anything would change
   azldev component update -a --check-only -q`,
 		RunE: azldev.RunFuncWithExtraArgs(func(env *azldev.Env, args []string) (interface{}, error) {
 			options.ComponentFilter.ComponentNamePatterns = append(
@@ -79,14 +87,15 @@ any component is stale or any lock would be pruned. Intended for CI gates.`,
 
 	components.AddComponentFilterOptionsToCommand(cmd, &options.ComponentFilter)
 
+	cmd.Flags().StringVar(&options.UpstreamCommitsDir, "upstream-commits-dir",
+		defaultUpstreamCommitsDir,
+		"directory for generated per-component upstream-commit TOML files")
+	_ = cmd.MarkFlagDirname("upstream-commits-dir")
 	cmd.Flags().BoolVar(&options.CheckOnly, "check-only", false,
-		"resolve upstream commits but do not write lock files or prune orphans. "+
+		"resolve upstream commits but do not write TOML files or prune orphans. "+
 			"Exits 0 when nothing would change and 1 when any component is stale "+
-			"(or, with --all-components, when any orphan lock "+
+			"(or, with --all-components, when any orphan generated TOML "+
 			"would be pruned). Intended for CI gates")
-	// Update always skips lock validation (it's the lock writer), so the
-	// flag is meaningless here. Hide it to avoid confusion.
-	_ = cmd.Flags().MarkHidden("skip-lock-validation")
 
 	return cmd
 }
@@ -103,17 +112,9 @@ type UpdateResult struct {
 }
 
 // UpdateComponents resolves upstream commits for all selected components and
-// writes the results to per-component lock files under locks/.
-// Lock validation is always skipped regardless of the caller's SkipLockValidation
-// value — update is the lock writer.
+// writes the results to per-component TOML files.
 func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]UpdateResult, error) {
 	resolver := components.NewResolver(env)
-	// Suppress staleness warnings — we're about to refresh the locks ourselves,
-	// so warning the user to "run component update" would be self-referential noise.
-	resolver.SuppressLockWarnings = true
-	// Skip lock validation — update is the lock file writer, so missing or
-	// stale locks are expected and will be fixed by this command.
-	options.ComponentFilter.SkipLockValidation = true
 
 	resolved, err := resolver.FindComponents(&options.ComponentFilter)
 	if err != nil {
@@ -127,25 +128,34 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 
 	upstreamComps := make([]components.Component, 0, len(allComps))
 	for _, comp := range allComps {
-		// Locks now represent only an upstream commit, so local components
-		// have no state for update to persist. Their filesystem content is
-		// consumed directly by render and build instead of being summarized
-		// into a lock fingerprint.
+		// Generated commit config applies only to upstream components. Local
+		// components have no remote identity to pin; render and build consume
+		// their filesystem content directly, so update must neither create nor
+		// retain a generated TOML for them.
 		if comp.GetConfig().Spec.SourceType == projectconfig.SpecSourceTypeUpstream {
 			upstreamComps = append(upstreamComps, comp)
 		}
 	}
 
-	store := env.LockStore()
-	if store == nil {
-		return nil, errors.New("no project directory configured; cannot update lock files")
+	if env.ProjectDir() == "" {
+		return nil, errors.New("no project directory configured; cannot update upstream commit TOML files")
 	}
 
+	commitDir := options.UpstreamCommitsDir
+	if commitDir == "" {
+		commitDir = defaultUpstreamCommitsDir
+	}
+
+	if !filepath.IsAbs(commitDir) {
+		commitDir = filepath.Join(env.ProjectDir(), commitDir)
+	}
+
+	store := upstreamcommit.NewStore(env.FS(), commitDir)
 	results := resolveUpstreamCommitsParallel(env, upstreamComps, store)
 
 	// Don't save if the context was cancelled (Ctrl+C).
 	if env.Context().Err() != nil {
-		return results, errors.New("update cancelled; lock files not updated")
+		return results, errors.New("update cancelled; upstream commit TOML files not updated")
 	}
 
 	// Check results and bail on errors before saving.
@@ -153,8 +163,8 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 		return results, err
 	}
 
-	// Write per-component lock files only on full success.
-	if err := saveComponentLocks(store, results, options.CheckOnly); err != nil {
+	// Write per-component TOML files only on full success.
+	if err := saveUpstreamCommitConfigs(store, results, options.CheckOnly); err != nil {
 		return results, err
 	}
 
@@ -165,12 +175,12 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 		logUpdateSummary(results)
 	}
 
-	// Prune orphan lock files when updating all components.
+	// Prune orphan generated TOML files when updating all components.
 	// Use the resolved component set (not raw config) to include
 	// spec-glob-discovered components that aren't in config directly.
-	// Lock files are version controlled, so pruning is safe even if the
+	// Generated TOMLs are version controlled, so pruning is safe even if the
 	// resolved set is empty (e.g., all components removed from config).
-	wouldPrune, orphanErr := handleOrphanLocks(store, allComps, options)
+	wouldPrune, orphanErr := handleOrphanConfigs(store, allComps, options)
 	if orphanErr != nil {
 		return results, orphanErr
 	}
@@ -183,13 +193,13 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 	return filterDisplayResults(results), nil
 }
 
-// handleOrphanLocks reconciles the lockfile directory with the resolved
-// component set. In normal mode it deletes orphan locks; in --check-only
+// handleOrphanConfigs reconciles the generated TOML directory with the resolved
+// component set. In normal mode it deletes orphan files; in --check-only
 // mode it returns the list of orphans that would be deleted without
 // touching disk. Returns (nil, nil) when not running with --all-components,
 // since orphan handling is scoped to whole-set updates.
-func handleOrphanLocks(
-	store *lockfile.Store,
+func handleOrphanConfigs(
+	store *upstreamcommit.Store,
 	comps []components.Component,
 	options *UpdateComponentOptions,
 ) ([]string, error) {
@@ -199,9 +209,9 @@ func handleOrphanLocks(
 
 	if len(comps) == 0 {
 		if options.CheckOnly {
-			slog.Warn("No components resolved; all existing lock files would be treated as orphans")
+			slog.Warn("No components resolved; all generated upstream commit TOMLs would be treated as orphans")
 		} else {
-			slog.Warn("No components resolved; all existing lock files will be treated as orphans")
+			slog.Warn("No components resolved; all generated upstream commit TOMLs will be treated as orphans")
 		}
 	}
 
@@ -211,9 +221,9 @@ func handleOrphanLocks(
 	}
 
 	if options.CheckOnly {
-		orphans, findErr := store.FindOrphanLockFiles(resolvedNames)
+		orphans, findErr := store.FindOrphans(resolvedNames)
 		if findErr != nil {
-			return nil, fmt.Errorf("finding orphan lock files:\n%w", findErr)
+			return nil, fmt.Errorf("finding orphan upstream commit TOMLs:\n%w", findErr)
 		}
 
 		return orphans, nil
@@ -221,18 +231,18 @@ func handleOrphanLocks(
 
 	pruned, pruneErr := store.PruneOrphans(resolvedNames)
 	if pruneErr != nil {
-		return nil, fmt.Errorf("pruning orphan lock files:\n%w", pruneErr)
+		return nil, fmt.Errorf("pruning orphan upstream commit TOMLs:\n%w", pruneErr)
 	}
 
 	if pruned > 0 {
-		slog.Info("Pruned orphan lock files", "count", pruned)
+		slog.Info("Pruned orphan upstream commit TOMLs", "count", pruned)
 	}
 
 	return nil, nil
 }
 
 // checkOnlyResult inspects the results of a --check-only update run and
-// returns (results, error) when any component would change or any lock file
+// returns (results, error) when any component would change or any generated TOML
 // would be pruned. The error names the affected components so CI logs are
 // useful at a glance. Returns (results, nil) when nothing would change --
 // the caller exits 0. Results are returned in both cases so structured
@@ -262,25 +272,27 @@ func checkOnlyResult(
 	}
 
 	if len(wouldPrune) > 0 {
-		parts = append(parts, fmt.Sprintf("%d orphan lock file(s) would be pruned: %s",
+		parts = append(parts, fmt.Sprintf("%d orphan upstream commit TOML file(s) would be pruned: %s",
 			len(wouldPrune), strings.Join(wouldPrune, ", ")))
 	}
 
-	return display, fmt.Errorf("lock files are stale; %s. Run 'azldev component update -a' to refresh",
+	return display, fmt.Errorf("upstream commit TOML files are stale; %s. Run 'azldev component update -a' to refresh",
 		strings.Join(parts, "; "))
 }
 
-// saveComponentLocks writes lock files for changed upstream commits.
-func saveComponentLocks(store *lockfile.Store, results []UpdateResult, checkOnly bool) error {
+// saveUpstreamCommitConfigs writes TOML files for changed upstream commits.
+func saveUpstreamCommitConfigs(
+	store *upstreamcommit.Store, results []UpdateResult, checkOnly bool,
+) error {
 	saved := make([]string, 0, len(results))
 
 	// Log partially-saved components on any error so the user knows which
-	// lock files were written before the failure.
+	// TOML files were written before the failure.
 	var retErr error
 
 	defer func() {
 		if retErr != nil && len(saved) > 0 {
-			slog.Info("Lock files saved before failure", "components", saved)
+			slog.Info("Upstream commit TOMLs saved before failure", "components", saved)
 		}
 	}()
 
@@ -289,7 +301,7 @@ func saveComponentLocks(store *lockfile.Store, results []UpdateResult, checkOnly
 			continue
 		}
 
-		written, err := updateComponentLock(store, &results[idx], checkOnly)
+		written, err := updateComponentConfig(store, &results[idx], checkOnly)
 		if err != nil {
 			retErr = err
 
@@ -304,21 +316,14 @@ func saveComponentLocks(store *lockfile.Store, results []UpdateResult, checkOnly
 	return nil
 }
 
-// updateComponentLock writes one changed lock file. The returned 'written'
+// updateComponentConfig writes one changed TOML file. The returned 'written'
 // flag is always false in check-only mode.
-func updateComponentLock(
-	store *lockfile.Store, result *UpdateResult, checkOnly bool,
+func updateComponentConfig(
+	store *upstreamcommit.Store, result *UpdateResult, checkOnly bool,
 ) (bool, error) {
 	if !result.Changed {
 		return false, nil
 	}
-
-	lock, lockErr := store.GetOrNew(result.Component)
-	if lockErr != nil {
-		return false, fmt.Errorf("loading lock for %#q:\n%w", result.Component, lockErr)
-	}
-
-	lock.UpstreamCommit = result.UpstreamCommit
 
 	// In check-only mode the caller wants to know what *would* change without
 	// touching disk. Skip the write but keep result.Changed flipped so the
@@ -327,8 +332,8 @@ func updateComponentLock(
 		return false, nil
 	}
 
-	if saveErr := store.Save(result.Component, lock); saveErr != nil {
-		return false, fmt.Errorf("saving lock file for %#q:\n%w", result.Component, saveErr)
+	if saveErr := store.Save(result.Component, result.UpstreamCommit); saveErr != nil {
+		return false, fmt.Errorf("saving upstream commit TOML for %#q:\n%w", result.Component, saveErr)
 	}
 
 	return true, nil
@@ -351,7 +356,7 @@ func checkUpdateErrors(results []UpdateResult) error {
 			"errors", len(failedNames))
 
 		return fmt.Errorf(
-			"%d component(s) failed to resolve; lock files not updated:\n  %s",
+			"%d component(s) failed to resolve; upstream commit TOML files not updated:\n  %s",
 			len(failedNames), strings.Join(failedNames, "\n  "))
 	}
 
@@ -398,7 +403,7 @@ func filterDisplayResults(results []UpdateResult) []UpdateResult {
 func resolveUpstreamCommitsParallel(
 	env *azldev.Env,
 	comps []components.Component,
-	store *lockfile.Store,
+	store *upstreamcommit.Store,
 ) []UpdateResult {
 	results := make([]UpdateResult, len(comps))
 
@@ -408,11 +413,10 @@ func resolveUpstreamCommitsParallel(
 	workerEnv, cancel := env.WithCancel()
 	defer cancel()
 
-	// Resolve every selected component instead of inferring freshness from a
-	// hash of snapshot, distro, and pin inputs stored in the lock. Removing that
-	// duplicate resolution state makes update behavior direct: the provider is
-	// the authority for the current identity, and the resulting identity is
-	// compared with the lock before deciding whether to write.
+	// Resolve every selected upstream component instead of inferring freshness
+	// from duplicated metadata. The provider is the authority for the commit
+	// selected by the snapshot, and that result is compared directly with the
+	// generated TOML before deciding whether a write is needed.
 	parallel := make([]parallelItem, len(comps))
 	for idx, comp := range comps {
 		results[idx].Component = comp.GetName()
@@ -459,12 +463,15 @@ func resolveAndRecordCommit(
 	env *azldev.Env,
 	cancel context.CancelFunc,
 	comp components.Component,
-	store *lockfile.Store,
+	store *upstreamcommit.Store,
 	result *UpdateResult,
 ) {
-	// Drop populated lock data so the source provider re-resolves
-	// from upstream instead of short-circuiting with the locked value.
-	comp.GetConfig().Locked = nil
+	// Clear the loaded pin before asking the provider to resolve. Render and
+	// build honor Spec.UpstreamCommit for reproducibility, but update is the
+	// operation that advances that pin: leaving the old value in place would
+	// make the provider return it immediately and a newer snapshot could never
+	// move the component forward.
+	comp.GetConfig().Spec.UpstreamCommit = ""
 
 	commit, resolveErr := resolveUpstreamCommit(ctx, env, comp)
 	if resolveErr != nil {
@@ -478,18 +485,14 @@ func resolveAndRecordCommit(
 
 	result.UpstreamCommit = commit
 
-	// Check existing lock to determine if the component changed.
-	checkLockChanged(store, comp.GetName(), result)
+	checkConfigChanged(store, comp.GetName(), result)
 }
 
-// checkLockChanged compares the resolved upstream commit against the existing
-// lock file to determine if the component changed. For new components (no lock
-// file), marks as Changed unconditionally. For existing locks, compares
-// UpstreamCommit values.
-func checkLockChanged(store *lockfile.Store, componentName string, result *UpdateResult) {
-	exists, existsErr := store.Exists(componentName)
-	if existsErr != nil {
-		result.Error = fmt.Sprintf("checking lock: %v", existsErr)
+// checkConfigChanged compares the resolved commit with the generated TOML.
+func checkConfigChanged(store *upstreamcommit.Store, componentName string, result *UpdateResult) {
+	existingCommit, exists, loadErr := store.Get(componentName)
+	if loadErr != nil {
+		result.Error = fmt.Sprintf("loading upstream commit TOML: %v", loadErr)
 
 		return
 	}
@@ -500,15 +503,8 @@ func checkLockChanged(store *lockfile.Store, componentName string, result *Updat
 		return
 	}
 
-	existingLock, loadErr := store.Get(componentName)
-	if loadErr != nil {
-		result.Error = fmt.Sprintf("loading lock: %v", loadErr)
-
-		return
-	}
-
-	result.PreviousCommit = existingLock.UpstreamCommit
-	result.Changed = existingLock.UpstreamCommit != result.UpstreamCommit
+	result.PreviousCommit = existingCommit
+	result.Changed = existingCommit != result.UpstreamCommit
 }
 
 func resolveUpstreamCommit(

@@ -4,6 +4,7 @@
 package projectconfig
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,8 +20,6 @@ import (
 )
 
 var (
-	// ErrDuplicateComponents is returned when duplicate conflicting component definitions are found.
-	ErrDuplicateComponents = errors.New("duplicate component")
 	// ErrDuplicateComponentGroups is returned when duplicate conflicting component group definitions are found.
 	ErrDuplicateComponentGroups = errors.New("duplicate component group")
 	// ErrDuplicateImages is returned when duplicate conflicting image definitions are found.
@@ -52,6 +51,17 @@ func loadAndResolveProjectConfig(
 		err := loadAndMergeConfigWithIncludes(resolvedCfg, fs, configFilePath, permissiveConfigParsing)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// A generated commit file is an override, not an independent component
+	// declaration. Drop entries assembled exclusively from generated files so
+	// deleting the real component definition cannot leave a "zombie" component
+	// alive merely because its stale generated pin is still included. Update
+	// can then identify and prune that orphan file during an all-component run.
+	for componentName, component := range resolvedCfg.Components {
+		if !component.hasNonGeneratedDefinition {
+			delete(resolvedCfg.Components, componentName)
 		}
 	}
 
@@ -214,18 +224,34 @@ func mergeComponentGroups(resolvedCfg *ProjectConfig, loadedCfg *ConfigFile) err
 }
 
 // mergeComponents merges component definitions from a loaded config file into
-// the resolved config. Duplicate component names are not allowed.
+// the resolved config. Later definitions override fields from earlier files.
 func mergeComponents(resolvedCfg *ProjectConfig, loadedCfg *ConfigFile) error {
 	for componentName, component := range loadedCfg.Components {
-		if _, ok := resolvedCfg.Components[componentName]; ok {
-			return fmt.Errorf("%w: %s", ErrDuplicateComponents, componentName)
-		}
-
 		// Fill out fields not explicitly serialized.
 		component.Name = componentName
-		component.SourceConfigFile = loadedCfg
 
-		resolvedCfg.Components[componentName] = *(component.WithAbsolutePaths(loadedCfg.dir))
+		component.hasNonGeneratedDefinition = !loadedCfg.generatedUpstreamCommitOverride
+		if component.hasNonGeneratedDefinition {
+			component.SourceConfigFile = loadedCfg
+		}
+
+		// Track commit provenance separately from the component's primary TOML.
+		// Synthetic history must follow the file that actually changed the pin,
+		// even when another partial component definition is merged later.
+		if component.Spec.UpstreamCommit != "" {
+			component.upstreamCommitConfigFile = loadedCfg
+		}
+
+		resolvedComponent := component.WithAbsolutePaths(loadedCfg.dir)
+		if existing, ok := resolvedCfg.Components[componentName]; ok {
+			if err := existing.MergeUpdatesFrom(resolvedComponent); err != nil {
+				return fmt.Errorf("failed to merge component %#q:\n%w", componentName, err)
+			}
+
+			resolvedCfg.Components[componentName] = existing
+		} else {
+			resolvedCfg.Components[componentName] = *resolvedComponent
+		}
 	}
 
 	return nil
@@ -428,6 +454,18 @@ func loadProjectConfigFile(
 
 		return nil, fmt.Errorf("failed to load project config from %s:\n%w", filePath, err)
 	}
+
+	data, err := fileutils.ReadFile(fs, absFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect project config file at %q:\n%w", absFilePath, err)
+	}
+
+	// The marker is a TOML comment, so generated files remain ordinary config
+	// documents while the loader can distinguish override-only declarations
+	// from user-authored component definitions without exposing a schema field.
+	cfg.generatedUpstreamCommitOverride = bytes.HasPrefix(
+		data, []byte(GeneratedUpstreamCommitMarker+"\n"),
+	)
 
 	// Keep track of where this came from.
 	cfg.sourcePath = absFilePath

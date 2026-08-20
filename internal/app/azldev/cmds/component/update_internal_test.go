@@ -7,42 +7,43 @@ import (
 	"testing"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/testutils"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
+	"github.com/microsoft/azure-linux-dev-tools/internal/upstreamcommit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const testLockDir = "/project/locks"
+const testUpstreamCommitsDir = "/project/base/upstream-commits"
 
-func TestSaveComponentLocks_WritesChangedCommit(t *testing.T) {
+func TestSaveUpstreamCommitConfigs_WritesChangedCommit(t *testing.T) {
 	env := testutils.NewTestEnv(t)
-	store := lockfile.NewStore(env.TestFS, testLockDir)
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 	results := []UpdateResult{{
 		Component:      "curl",
 		UpstreamCommit: "abc123",
 		Changed:        true,
 	}}
 
-	require.NoError(t, saveComponentLocks(store, results, false))
+	require.NoError(t, saveUpstreamCommitConfigs(store, results, false))
 
-	lock, err := store.Get("curl")
+	commit, exists, err := store.Get("curl")
 	require.NoError(t, err)
-	assert.Equal(t, "abc123", lock.UpstreamCommit)
+	assert.True(t, exists)
+	assert.Equal(t, "abc123", commit)
 }
 
-func TestSaveComponentLocks_SkipsUnchangedAndFailed(t *testing.T) {
+func TestSaveUpstreamCommitConfigs_SkipsUnchangedAndFailed(t *testing.T) {
 	env := testutils.NewTestEnv(t)
-	store := lockfile.NewStore(env.TestFS, testLockDir)
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 	results := []UpdateResult{
 		{Component: "unchanged"},
 		{Component: "errored", Changed: true, Error: "resolution failed"},
 		{Component: "skipped", Changed: true, Skipped: true, SkipReason: "cancelled"},
 	}
 
-	require.NoError(t, saveComponentLocks(store, results, false))
+	require.NoError(t, saveUpstreamCommitConfigs(store, results, false))
 
 	for _, componentName := range []string{"unchanged", "errored", "skipped"} {
-		exists, err := store.Exists(componentName)
+		_, exists, err := store.Get(componentName)
 		require.NoError(t, err)
 		assert.False(t, exists)
 	}

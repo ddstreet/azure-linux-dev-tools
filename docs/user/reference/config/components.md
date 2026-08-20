@@ -88,6 +88,19 @@ The value must be a hex string between 7 and 40 characters (a short or full git 
 
 > **Note:** Commit-pinning is intended for temporary use. Once the desired change lands in a tagged upstream release, switch back to version-based pinning or the default snapshot to keep the component aligned with the upstream distro.
 
+`azldev component update` resolves commits from the configured snapshot and writes one
+normal component config file per upstream component under `base/upstream-commits/` by
+default. Include those generated files in the project configuration so all commands use
+the resolved commits:
+
+```toml
+includes = ["base/upstream-commits/*.toml"]
+```
+
+Each generated file supplies the component's `spec.upstream-commit` and is merged with
+the component's earlier definition. Use `--upstream-commits-dir` to choose a different
+directory, and update the include pattern to match.
+
 ### Local Specs
 
 For components that originate from your project (not imported from upstream), use a local spec:
