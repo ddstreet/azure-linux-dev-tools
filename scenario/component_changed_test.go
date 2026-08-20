@@ -95,12 +95,12 @@ func writeFileInDir(t *testing.T, dir, relPath, content string) {
 // Flow:
 //  1. Create a project with two local components (curl, bash) and a minimal
 //     distro config patched in for local (non-container) execution.
-//  2. Commit initial lock files for both components with distinct fingerprints.
-//  3. In a second commit, update only curl's lock file (new fingerprint).
+//  2. Commit initial lock files for both components with distinct upstream commits.
+//  3. In a second commit, update only curl's lock file.
 //  4. Run `azldev component changed --from <commit1> -a --include-unchanged`
 //     to compare the two commits with JSON output.
-//  5. Assert curl is reported as "changed" (fingerprint differs between refs)
-//     and bash as "unchanged" (fingerprint identical at both refs).
+//  5. Assert curl is reported as "changed" (upstream commit differs between refs)
+//     and bash as "unchanged" (upstream commit is identical at both refs).
 func TestComponentChanged_E2E(t *testing.T) {
 	t.Parallel()
 
@@ -152,13 +152,13 @@ func TestComponentChanged_E2E(t *testing.T) {
 	patchProjectForLocal(t, projectDir)
 
 	// Step 2: Initialize git repo. Create lock files for both components
-	// with version 1 fingerprints, then commit everything as the baseline.
+	// with version 1 upstream commits, then commit everything as the baseline.
 	gitInDir(t, projectDir, "init")
 	gitInDir(t, projectDir, "config", "user.email", "test@test.com")
 	gitInDir(t, projectDir, "config", "user.name", "Test")
 
-	lockV1Curl := fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v1")
-	lockV1Bash := fmt.Sprintf("input-fingerprint = %q\n", "sha256:bash-v1")
+	lockV1Curl := fmt.Sprintf("upstream-commit = %q\n", "curl-v1")
+	lockV1Bash := fmt.Sprintf("upstream-commit = %q\n", "bash-v1")
 
 	writeFileInDir(t, projectDir, "locks/curl.lock", lockV1Curl)
 	writeFileInDir(t, projectDir, "locks/bash.lock", lockV1Bash)
@@ -169,7 +169,7 @@ func TestComponentChanged_E2E(t *testing.T) {
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Second commit: change curl's lock, leave bash unchanged.
-	lockV2Curl := fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v2")
+	lockV2Curl := fmt.Sprintf("upstream-commit = %q\n", "curl-v2")
 	writeFileInDir(t, projectDir, "locks/curl.lock", lockV2Curl)
 
 	gitInDir(t, projectDir, "add", "locks/curl.lock")
@@ -195,12 +195,12 @@ func TestComponentChanged_E2E(t *testing.T) {
 	// curl should be changed.
 	curlResult, ok := resultMap["curl"]
 	require.True(t, ok, "curl should be in results")
-	assert.Equal(t, "changed", curlResult.ChangeType, "curl fingerprint changed")
+	assert.Equal(t, "changed", curlResult.ChangeType, "curl upstream commit changed")
 
 	// bash should be unchanged.
 	bashResult, ok := resultMap["bash"]
 	require.True(t, ok, "bash should be in results (--all-components)")
-	assert.Equal(t, "unchanged", bashResult.ChangeType, "bash fingerprint unchanged")
+	assert.Equal(t, "unchanged", bashResult.ChangeType, "bash upstream commit unchanged")
 }
 
 // TestComponentChanged_SameRef verifies that comparing a ref to itself produces
@@ -243,7 +243,7 @@ func TestComponentChanged_SameRef(t *testing.T) {
 	gitInDir(t, projectDir, "config", "user.email", "test@test.com")
 	gitInDir(t, projectDir, "config", "user.name", "Test")
 
-	lockContent := fmt.Sprintf("input-fingerprint = %q\n", "sha256:v1")
+	lockContent := fmt.Sprintf("upstream-commit = %q\n", "v1")
 	writeFileInDir(t, projectDir, "locks/curl.lock", lockContent)
 
 	gitInDir(t, projectDir, "add", ".")
@@ -355,7 +355,7 @@ func setupProjectWithGit(
 // Flow:
 //  1. Create a project with one component (curl) and a rendered-specs-dir.
 //  2. Commit initial lock + sources file.
-//  3. In a second commit, update the lock fingerprint AND the sources file.
+//  3. In a second commit, update the upstream commit AND the sources file.
 //  4. Assert changeType="changed" and sourcesChange="true".
 //  5. In a third commit, update only the lock (not sources).
 //  6. Compare commit 2→3: assert changeType="changed", sourcesChange="false"
@@ -388,36 +388,36 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 
 	// Commit 1: initial lock + rendered sources.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.0.tar.gz) = aaa111")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 	ref1 := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 2: change lock fingerprint AND sources (new tarball).
+	// Commit 2: change upstream commit AND sources (new tarball).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v2"))
+		fmt.Sprintf("upstream-commit = %q\n", "v2"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.1.tar.gz) = bbb222")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "update sources")
 	ref2 := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 3: change lock fingerprint only (config tweak, same tarball).
+	// Commit 3: change upstream commit only (same tarball).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v3"))
+		fmt.Sprintf("upstream-commit = %q\n", "v3"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "config change")
 
-	// ref1 → ref2: fingerprint AND sources changed.
+	// ref1 → ref2: upstream commit AND sources changed.
 	results := runChanged(t, azldevBin, projectDir, "--from", ref1, "--to", ref2, "-a")
 	rm := resultMap(results)
 	require.Contains(t, rm, "curl")
 	assert.Equal(t, "changed", rm["curl"].ChangeType)
 	assert.True(t, rm["curl"].SourcesChange, "sources file changed between refs")
 
-	// ref2 → HEAD: fingerprint changed, sources unchanged.
+	// ref2 → HEAD: upstream commit changed, sources unchanged.
 	results = runChanged(t, azldevBin, projectDir, "--from", ref2, "-a")
 	rm = resultMap(results)
 	require.Contains(t, rm, "curl")
@@ -431,7 +431,7 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 // Flow:
 //  1. Create a project with one component, commit two versions of its lock.
 //  2. Compare forward (old→new): changeType="changed".
-//  3. Compare backward (new→old): also changeType="changed" (fingerprint
+//  3. Compare backward (new→old): also changeType="changed" (upstream commit
 //     still differs, just in the other direction).
 func TestComponentChanged_InvertedRefs(t *testing.T) {
 	t.Parallel()
@@ -461,14 +461,14 @@ func TestComponentChanged_InvertedRefs(t *testing.T) {
 
 	// Commit 1: v1 lock.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:old"))
+		fmt.Sprintf("upstream-commit = %q\n", "old"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "v1")
 	oldRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Commit 2: v2 lock.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:new"))
+		fmt.Sprintf("upstream-commit = %q\n", "new"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "v2")
 	newRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
@@ -477,13 +477,13 @@ func TestComponentChanged_InvertedRefs(t *testing.T) {
 	forward := runChanged(t, azldevBin, projectDir, "--from", oldRef, "--to", newRef, "-a")
 	rm := resultMap(forward)
 	require.Contains(t, rm, "curl")
-	assert.Equal(t, "changed", rm["curl"].ChangeType, "forward: fingerprint differs")
+	assert.Equal(t, "changed", rm["curl"].ChangeType, "forward: upstream commit differs")
 
 	// Backward: new → old (inverted).
 	backward := runChanged(t, azldevBin, projectDir, "--from", newRef, "--to", oldRef, "-a")
 	rm = resultMap(backward)
 	require.Contains(t, rm, "curl")
-	assert.Equal(t, "changed", rm["curl"].ChangeType, "backward: fingerprint still differs")
+	assert.Equal(t, "changed", rm["curl"].ChangeType, "backward: upstream commit still differs")
 }
 
 // TestComponentChanged_NewComponent verifies that a component whose lock file
@@ -527,7 +527,7 @@ func TestComponentChanged_NewComponent(t *testing.T) {
 
 	// Commit 2: add curl lock.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:first"))
+		fmt.Sprintf("upstream-commit = %q\n", "first"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "add curl")
 
@@ -572,9 +572,9 @@ func TestComponentChanged_DeletedComponent(t *testing.T) {
 
 	// Commit 1: lock files for curl (in config) and oldpkg (NOT in config).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "curl-v1"))
 	writeFileInDir(t, projectDir, "locks/oldpkg.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:oldpkg-v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "oldpkg-v1"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
@@ -587,7 +587,7 @@ func TestComponentChanged_DeletedComponent(t *testing.T) {
 	results := runChanged(t, azldevBin, projectDir, "--from", fromRef, "-a")
 	rm := resultMap(results)
 
-	// curl should be unchanged (same fingerprint).
+	// curl should be unchanged (same upstream commit).
 	// oldpkg (not in config, lock removed) should be "deleted".
 	require.Contains(t, rm, "oldpkg", "deleted non-config component should appear in results")
 	assert.Equal(t, "deleted", rm["oldpkg"].ChangeType, "removed lock for non-config component")
@@ -644,20 +644,20 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 
 	// Commit 1: curl has lock + sources, bash has lock, oldpkg has lock (not in config).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "curl-v1"))
 	writeFileInDir(t, projectDir, "locks/bash.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:bash-v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "bash-v1"))
 	writeFileInDir(t, projectDir, "locks/oldpkg.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:old-v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "old-v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-1.0.tar.gz) = aaa")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 2: curl fingerprint + sources changed, bash unchanged, oldpkg removed.
+	// Commit 2: curl upstream commit + sources changed, bash unchanged, oldpkg removed.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v2"))
+		fmt.Sprintf("upstream-commit = %q\n", "curl-v2"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-2.0.tar.gz) = bbb")
 	gitInDir(t, projectDir, "rm", "locks/oldpkg.lock")
@@ -696,7 +696,7 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 	rm := resultMap(results)
 
 	// Expected states:
-	//   curl:   changed  + sourcesChange=true  (both fingerprint and sources differ)
+	//   curl:   changed  + sourcesChange=true  (both upstream commit and sources differ)
 	//   bash:   unchanged + sourcesChange=false (identical at both refs)
 	//   oldpkg: deleted  + sourcesChange=true   (non-config, lock removed)
 	validChangeTypes := map[string]bool{
@@ -721,21 +721,9 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 	assert.Equal(t, "deleted", rm["oldpkg"].ChangeType)
 }
 
-// TestComponentChanged_IntegrityViolation verifies that a manually-edited
-// rendered sources file with no corresponding fingerprint change causes
-// `azldev component changed` to fail with a non-zero exit code.
-//
-// This is the cache-poisoning vector: a malicious PR commits an attacker-
-// chosen (filename, hash) pair into a rendered sources file without touching
-// the lock that drives re-rendering. The CLI fails hard on this combination
-// because it cannot occur from a clean render.
-//
-// Flow:
-//  1. Commit 1: lock + matching rendered sources file.
-//  2. Commit 2: edit ONLY the sources file (lock fingerprint identical).
-//  3. Run `azldev component changed`: must fail with an error naming the
-//     affected component.
-func TestComponentChanged_IntegrityViolation(t *testing.T) {
+// TestComponentChanged_SourcesOnlyChange verifies that rendered sources changes
+// are reported independently from upstream commit changes.
+func TestComponentChanged_SourcesOnlyChange(t *testing.T) {
 	t.Parallel()
 
 	if testing.Short() {
@@ -763,32 +751,23 @@ func TestComponentChanged_IntegrityViolation(t *testing.T) {
 
 	// Commit 1: lock + matching rendered sources.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v1"))
+		fmt.Sprintf("upstream-commit = %q\n", "v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.0.tar.gz) = aaa111")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
-	// Commit 2: edit ONLY the rendered sources file. Lock fingerprint
-	// identical -- no legitimate render would produce this drift.
+	// Commit 2: edit only the rendered sources file.
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (evil-payload.tar.gz) = deadbeef")
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "tamper")
 
-	cmd := exec.CommandContext(t.Context(),
-		azldevBin, "-C", projectDir, "--no-default-config", "component", "changed",
-		"--from", fromRef, "-a", "-q", "-O", "json",
-	)
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	results := runChanged(t, azldevBin, projectDir, "--from", fromRef, "-a")
+	rm := resultMap(results)
 
-	require.Error(t, err, "integrity violation must fail the command")
-	assert.Contains(t, stderr.String(), "drifted rendered sources",
-		"error should explain the integrity violation")
-	assert.Contains(t, stderr.String(), "curl",
-		"error should name the affected component")
+	require.Contains(t, rm, "curl")
+	assert.Equal(t, "unchanged", rm["curl"].ChangeType)
+	assert.True(t, rm["curl"].SourcesChange)
 }

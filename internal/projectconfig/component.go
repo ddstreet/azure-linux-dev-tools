@@ -67,9 +67,9 @@ func (t OriginType) IsFetched() bool {
 // An origin is required for every 'source-files' entry.
 type Origin struct {
 	// Type indicates how the source file should be acquired.
-	Type OriginType `toml:"type" json:"type" jsonschema:"required,enum=download,enum=custom,enum=overlay,title=Origin type,description=Type of origin for this source file" fingerprint:"-"`
+	Type OriginType `toml:"type" json:"type" jsonschema:"required,enum=download,enum=custom,enum=overlay,title=Origin type,description=Type of origin for this source file"`
 	// Uri to download the source file from if origin type is 'download'. Ignored for other origin types.
-	Uri string `toml:"uri,omitempty" json:"uri,omitempty" jsonschema:"title=URI,description=URI to download the source file from if origin type is 'download',example=https://example.com/source.tar.gz" fingerprint:"-"`
+	Uri string `toml:"uri,omitempty" json:"uri,omitempty" jsonschema:"title=URI,description=URI to download the source file from if origin type is 'download',example=https://example.com/source.tar.gz"`
 
 	// Script is the filename of a shell script, relative to the component's spec directory,
 	// that is run inside a mock chroot to generate this source file.
@@ -86,26 +86,10 @@ type Origin struct {
 	Inputs []string `toml:"inputs,omitempty" json:"inputs,omitempty" jsonschema:"title=Inputs,description=Source-output filenames to make available next to the generation script before it runs. Only valid when origin type is 'custom'."`
 }
 
-// HashInclude implements the hashstructure [Includable] interface so that
-// [Origin.Script], [Origin.MockPackages], and [Origin.Inputs] are omitted from
-// the component fingerprint when they hold their zero values.
-func (o Origin) HashInclude(field string, _ any) (bool, error) {
-	switch field {
-	case "Script":
-		return o.Script != "", nil
-	case "MockPackages":
-		return len(o.MockPackages) > 0, nil
-	case "Inputs":
-		return len(o.Inputs) > 0, nil
-	}
-
-	return true, nil
-}
-
 // SourceFileReference encapsulates a reference to a specific source file artifact.
 type SourceFileReference struct {
 	// Reference to the component to which the source file belongs.
-	Component ComponentReference `toml:"-" json:"-" fingerprint:"-"`
+	Component ComponentReference `toml:"-" json:"-"`
 
 	// Name of the source file; must be non-empty.
 	Filename string `toml:"filename" json:"filename"`
@@ -128,8 +112,8 @@ type SourceFileReference struct {
 
 	// ReplaceReason is a human-readable explanation for why an upstream 'sources' entry is
 	// being replaced. Required when [SourceFileReference.ReplaceUpstream] is true; must be
-	// empty otherwise. Excluded from the fingerprint because it is documentation only.
-	ReplaceReason string `toml:"replace-reason,omitempty" json:"replaceReason,omitempty" jsonschema:"title=Replace reason,description=Required when 'replace-upstream' is true. Human-readable explanation for the replacement." fingerprint:"-"`
+	// empty otherwise.
+	ReplaceReason string `toml:"replace-reason,omitempty" json:"replaceReason,omitempty" jsonschema:"title=Replace reason,description=Required when 'replace-upstream' is true. Human-readable explanation for the replacement."`
 }
 
 // ValidateArchiveOverlays validates archive/origin associations and prevents
@@ -183,17 +167,6 @@ func (c *ComponentConfig) ValidateArchiveOverlays(allowMissingOrigins bool) erro
 	}
 
 	return nil
-}
-
-// HashInclude implements the hashstructure [Includable] interface so that
-// [SourceFileReference.Origin] is omitted from the component fingerprint when
-// none of [Origin.Script], [Origin.MockPackages], or [Origin.Inputs] are set.
-func (r SourceFileReference) HashInclude(field string, _ any) (bool, error) {
-	if field == "Origin" {
-		return r.Origin.Script != "" || len(r.Origin.MockPackages) > 0 || len(r.Origin.Inputs) > 0, nil
-	}
-
-	return true, nil
 }
 
 // ComponentPublishConfig holds publish channel settings for a component's packages.
@@ -299,38 +272,35 @@ type ReleaseConfig struct {
 // (lock data). Populated by the component resolver from the lock store; nil when
 // no lock file exists for this component.
 //
-// Not serialized to TOML config and not fingerprinted - runtime-only. The data
-// IS included in JSON output (e.g., 'component list -O json') under "locked"
+// Not serialized to TOML config. The data is included in JSON output
+// (e.g., 'component list -O json') under "locked"
 // so users can inspect resolved lock state. The pointer must not be shared
 // across value-copied configs; the resolver always allocates a fresh struct
 // per component, and [ComponentConfig.WithAbsolutePaths] deep-copies it.
 type ComponentLockData struct {
 	// UpstreamCommit is the resolved upstream commit from the lock file.
 	UpstreamCommit string `json:"upstreamCommit,omitempty"`
-	// InputFingerprint is the stored fingerprint from the last update.
-	// Covers build inputs (config, overlays, commit, release ver)
-	InputFingerprint string `json:"inputFingerprint,omitempty"`
 }
 
 // Defines a component.
 type ComponentConfig struct {
 	// The component's name; not actually present in serialized files.
-	Name string `toml:"-" json:"name" table:",sortkey" fingerprint:"-"`
+	Name string `toml:"-" json:"name" table:",sortkey"`
 
 	// Reference to the source config file that this definition came from; not present
 	// in serialized files.
-	SourceConfigFile *ConfigFile `toml:"-" json:"-" table:"-" fingerprint:"-"`
+	SourceConfigFile *ConfigFile `toml:"-" json:"-" table:"-"`
 
 	// RenderedSpecDir is the output directory for this component's rendered spec files.
 	// Derived at resolve time from the project's rendered-specs-dir setting; not present
 	// in serialized files. Empty when rendered-specs-dir is not configured.
-	RenderedSpecDir string `toml:"-" json:"renderedSpecDir,omitempty" table:"-" fingerprint:"-"`
+	RenderedSpecDir string `toml:"-" json:"renderedSpecDir,omitempty" table:"-"`
 
 	// Locked holds resolved lock file state for this component. Populated by
 	// the component resolver from the lock store. Nil when no lock file exists.
 	// During 'component update', this field may be cleared before re-resolving
 	// to prevent the source provider from short-circuiting with stale values.
-	Locked *ComponentLockData `toml:"-" json:"locked,omitempty" table:"-" fingerprint:"-"`
+	Locked *ComponentLockData `toml:"-" json:"locked,omitempty" table:"-"`
 
 	// Where to get its spec and adjacent files from.
 	Spec SpecSource `toml:"spec,omitempty" json:"spec,omitempty" jsonschema:"title=Spec,description=Identifies where to find the spec for this component"`
@@ -352,9 +322,8 @@ type ComponentConfig struct {
 	// occurrence. The resulting overlays are appended to [ComponentConfig.Overlays]
 	// after any inline overlays. A value set in a higher-priority config layer replaces
 	// lower-priority overlay-files values; an explicit empty list disables inherited
-	// overlay files. Excluded from the fingerprint because the value affects only where
-	// overlays are sourced from, not their content.
-	OverlayFiles []string `toml:"overlay-files,omitempty" json:"overlayFiles,omitempty" table:"-" validate:"dive,required" jsonschema:"title=Overlay files,description=Path or glob patterns (relative to the component config file or matched spec directory) matched against the filesystem to locate per-file overlay documents after component config resolution. Use an empty list to disable inherited overlay-file patterns" fingerprint:"-"`
+	// overlay files.
+	OverlayFiles []string `toml:"overlay-files,omitempty" json:"overlayFiles,omitempty" table:"-" validate:"dive,required" jsonschema:"title=Overlay files,description=Path or glob patterns (relative to the component config file or matched spec directory) matched against the filesystem to locate per-file overlay documents after component config resolution. Use an empty list to disable inherited overlay-file patterns"`
 
 	// Configuration for building the component.
 	Build ComponentBuildConfig `toml:"build,omitempty" json:"build,omitempty" table:"-" jsonschema:"title=Build configuration,description=Configuration for building the component"`
@@ -372,7 +341,7 @@ type ComponentConfig struct {
 	// Publish holds the component-level publish settings. These provide default channels for
 	// all packages produced by this component. Overridden by package-group and per-package settings
 	// for binary and debuginfo channels.
-	Publish ComponentPublishConfig `toml:"publish,omitempty" json:"publish,omitempty" table:"-" jsonschema:"title=Publish settings,description=Component-level publish channel settings" fingerprint:"-"`
+	Publish ComponentPublishConfig `toml:"publish,omitempty" json:"publish,omitempty" table:"-" jsonschema:"title=Publish settings,description=Component-level publish channel settings"`
 }
 
 // AllowedSourceFilesHashTypes defines the set of hash types that are supported

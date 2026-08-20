@@ -10,19 +10,16 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/brunoga/deep"
-	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/archive"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 )
 
 // ComponentOverlay represents an overlay that may be applied to a component's spec and/or its sources.
-//
-//nolint:recvcheck // HashInclude needs a value receiver for hashstructure; all other methods use pointer receivers.
 type ComponentOverlay struct {
 	// The type of overlay to apply.
 	Type ComponentOverlayType `toml:"type" json:"type" validate:"required" jsonschema:"enum=spec-add-tag,enum=spec-insert-tag,enum=spec-set-tag,enum=spec-update-tag,enum=spec-remove-tag,enum=spec-prepend-lines,enum=spec-append-lines,enum=spec-search-replace,enum=spec-remove-section,enum=spec-remove-subpackage,enum=patch-add,enum=patch-remove,enum=file-prepend-lines,enum=file-search-replace,enum=file-add,enum=file-remove,enum=file-rename,title=Overlay type,description=The type of overlay to apply"`
 	// Human readable description of overlay; primarily present to document the need for the change.
-	Description string `toml:"description,omitempty" json:"description,omitempty" jsonschema:"title=Description,description=Human readable description of overlay" fingerprint:"-"`
+	Description string `toml:"description,omitempty" json:"description,omitempty" jsonschema:"title=Description,description=Human readable description of overlay"`
 
 	// For overlays that apply to non-spec files, indicates the filename. For overlays that can
 	// apply to multiple files, supports glob patterns (including globstar).
@@ -53,16 +50,13 @@ type ComponentOverlay struct {
 	Lines []string `toml:"lines,omitempty" json:"lines,omitempty" jsonschema:"title=Lines,description=The lines of text to use"`
 	// For overlays that require a source file as input, indicates a path to that file; relative paths are relative to
 	// the config file that defines the overlay.
-	// Excluded from fingerprint because it contains an absolute path that varies by checkout
-	// location. Overlay content is hashed separately by [fingerprint.ComputeIdentity].
-	Source string `toml:"source,omitempty" json:"source,omitempty" jsonschema:"title=Source,description=For overlays that require a source file as input, indicates a path to that file; relative paths are relative to the config file that defines the overlay" fingerprint:"-"`
+	Source string `toml:"source,omitempty" json:"source,omitempty" jsonschema:"title=Source,description=For overlays that require a source file as input, indicates a path to that file; relative paths are relative to the config file that defines the overlay"`
 
 	// Metadata describes the intent and provenance of the overlay (category, related
 	// commits, bug links, upstreamability, etc.). Optional. Populated either inline
 	// in the component config file or by the [ComponentConfig.OverlayFiles] loader,
 	// which stamps the per-file metadata onto every overlay declared in that file.
-	// Excluded from the fingerprint because it is documentation only.
-	Metadata *OverlayMetadata `toml:"metadata,omitempty" json:"metadata,omitempty" jsonschema:"title=Metadata,description=Optional documentation metadata describing the overlay's intent and provenance" fingerprint:"-"`
+	Metadata *OverlayMetadata `toml:"metadata,omitempty" json:"metadata,omitempty" jsonschema:"title=Metadata,description=Optional documentation metadata describing the overlay's intent and provenance"`
 }
 
 // EffectiveSourceName returns the checkout-independent identity of the overlay's
@@ -82,25 +76,6 @@ func (c *ComponentOverlay) EffectiveSourceName() string {
 	}
 
 	return filepath.Base(c.Source)
-}
-
-// SourceContentIdentity returns an opaque identity string for the overlay's source
-// file, combining the effective destination filename and a SHA256 content hash.
-// Returns empty string and nil error if the overlay has no source file.
-// Used by [fingerprint.ComputeIdentity] so that fingerprint logic does not need
-// overlay-specific knowledge.
-func (c *ComponentOverlay) SourceContentIdentity(fs opctx.FS) (string, error) {
-	name := c.EffectiveSourceName()
-	if name == "" {
-		return "", nil
-	}
-
-	contentHash, err := fileutils.ComputeFileHash(fs, fileutils.HashTypeSHA256, c.Source)
-	if err != nil {
-		return "", fmt.Errorf("hashing overlay source %#q:\n%w", c.Source, err)
-	}
-
-	return name + ":" + contentHash, nil
 }
 
 // WithAbsolutePaths returns a copy of the overlay with config-relative file paths converted to absolute
@@ -218,26 +193,6 @@ func (c *ComponentOverlay) TargetsLooseFile(filename string) (bool, error) {
 	}
 
 	return matches, nil
-}
-
-// HashInclude implements the hashstructure Includable interface so the
-// [ComponentOverlay.Archive] field is omitted from the component fingerprint while it holds
-// its default (empty) value. A defaulted Archive therefore reproduces the pre-existing fingerprint
-// (no cascading rebuild for existing overlays), while a non-empty Archive contributes to the hash.
-// Every other field is always included, preserving existing hashing behaviour.
-//
-// NOTE: Remove this method once the RFC for explicit fingerprint exclusions is implemented and
-// [ComponentOverlay.Archive] can be tagged with `fingerprint:"-,nonzero"` (or equivalent) instead.
-//
-// NOTE: the value receiver is required — [fingerprint.ComputeIdentity] hashes the component by
-// value, so the struct (and its nested fields) are not addressable and a pointer-receiver method
-// would never be detected by hashstructure.
-func (c ComponentOverlay) HashInclude(field string, _ any) (bool, error) {
-	if field == "Archive" {
-		return c.Archive != "", nil
-	}
-
-	return true, nil
 }
 
 // ComponentOverlayType is the type of a component overlay.

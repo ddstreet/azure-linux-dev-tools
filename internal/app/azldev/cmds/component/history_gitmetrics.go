@@ -180,7 +180,7 @@ func collectUniqueTomlRelPathsFromStubs(repoRoot string, stubs []historyStub) []
 
 // buildHistoryResult assembles a single [HistoryResult] for a stub. The
 // stub already carries the precomputed customization items; this function
-// fills in the git-driven metrics (toml-commits via cache, fingerprint-changes via
+// fills in the git-driven metrics (toml-commits via cache, lock-changes via
 // per-call repo).
 func buildHistoryResult(
 	env *azldev.Env,
@@ -270,14 +270,14 @@ func populateTomlMetrics(
 	result.LatestCommit = metrics.latest
 }
 
-// populateLockMetrics fills in FingerprintChanges, FingerprintChangeDetails,
+// populateLockMetrics fills in LockChanges, LockChangeDetails,
 // and HasLock.
 // A missing lock file is "no data", not an error; a genuine read failure
 // (corrupt/unparseable lock) is surfaced via result.Warnings so a
-// tomlCommits/fingerprintChanges of 0 can't be silently confused with a
+// tomlCommits/lockChanges of 0 can't be silently confused with a
 // real failure.
 //
-// FingerprintChangeDetails is always populated here; the caller strips it
+// LockChangeDetails is always populated here; the caller strips it
 // when more than one component is reported. See [ComponentHistory] for the
 // rationale.
 func populateLockMetrics(
@@ -300,7 +300,7 @@ func populateLockMetrics(
 			// read failure (corrupt/unparseable lock). Mirror the store's
 			// own not-found detection (Exists) since the wrapped fs error
 			// isn't reliably errors.Is(os.ErrNotExist)-comparable. Only a
-			// genuine failure earns a warning, so a fingerprintChanges of 0
+			// genuine failure earns a warning, so a lockChanges value of 0
 			// can't be silently confused with a load error.
 			exists, existsErr := lockReader.Exists(name)
 			switch {
@@ -329,13 +329,13 @@ func populateLockMetrics(
 	if err != nil {
 		// Lock dir lives outside the repo: nothing to count.
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("lock file %q is outside the git repository; fingerprint-changes skipped: %v",
+			fmt.Sprintf("lock file %q is outside the git repository; lock-changes skipped: %v",
 				lockAbsPath, err))
 
 		return
 	}
 
-	fingerprintChanges, err := func() ([]sources.FingerprintChange, error) {
+	lockChanges, err := func() ([]sources.LockChange, error) {
 		// Open a fresh repo for this call -- go-git's *Repository is not
 		// safe for concurrent use. Opening is cheap (just reads .git/config).
 		repo, openErr := git.OpenProjectRepo(env.ProjectDir())
@@ -343,35 +343,35 @@ func populateLockMetrics(
 			return nil, fmt.Errorf("opening project repository:\n%w", openErr)
 		}
 
-		return sources.FindFingerprintChanges(env.Context(), env, repo, ctx.repoRoot, lockRelPath)
+		return sources.FindLockChanges(env.Context(), env, repo, ctx.repoRoot, lockRelPath)
 	}()
 	if err != nil {
 		// A lock file with no committed history is NOT an error here --
-		// FindFingerprintChanges returns (nil, nil) in that case. This
+		// FindLockChanges returns (nil, nil) in that case. This
 		// branch only fires on real failures (git open, blob read, etc.).
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("computing fingerprint changes for %q: %v", lockRelPath, err))
+			fmt.Sprintf("computing lock changes for %q: %v", lockRelPath, err))
 
 		return
 	}
 
-	result.FingerprintChanges = len(fingerprintChanges)
-	result.FingerprintChangeDetails = toFingerprintChanges(fingerprintChanges)
+	result.LockChanges = len(lockChanges)
+	result.LockChangeDetails = toLockChanges(lockChanges)
 }
 
-// toFingerprintChanges copies each [sources.FingerprintChange] into the
-// local [FingerprintChange] wire type by naming every field explicitly.
-// Removing a field from [sources.FingerprintChange] or
+// toLockChanges copies each [sources.LockChange] into the local [LockChange]
+// wire type by naming every field explicitly. Removing a field from
+// [sources.LockChange] or
 // [sources.CommitMetadata] trips a compile error here, alerting us to a
 // quietly-shrunk changelog payload.
-func toFingerprintChanges(changes []sources.FingerprintChange) []FingerprintChange {
+func toLockChanges(changes []sources.LockChange) []LockChange {
 	if len(changes) == 0 {
 		return nil
 	}
 
-	out := make([]FingerprintChange, len(changes))
+	out := make([]LockChange, len(changes))
 	for i, change := range changes {
-		out[i] = FingerprintChange{
+		out[i] = LockChange{
 			Hash:           change.Hash,
 			Author:         change.Author,
 			AuthorEmail:    change.AuthorEmail,

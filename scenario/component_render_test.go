@@ -545,84 +545,6 @@ func TestRenderBrokenSpecWithGoodSpec(t *testing.T) {
 	require.FileExists(t, markerPath, "RENDER_FAILED marker should exist for broken component")
 }
 
-// TestRenderLocalSpecWithSyntheticHistory verifies that rendering a local
-// component with a committed lock file produces synthetic commits that
-// rpmautospec can use to expand %autorelease, and that dirty detection
-// correctly identifies uncommitted fingerprint changes.
-//
-// Existing render tests never commit lock files, so buildSyntheticCommits
-// finds no lock at HEAD and returns early. This test pre-bakes a lock file
-// with a stale fingerprint and includes an overlay that changes the runtime
-// fingerprint — exercising both the synthetic history pipeline and dirty
-// detection in one pass.
-func TestRenderLocalSpecWithSyntheticHistory(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("skipping long test")
-	}
-
-	spec := projecttest.NewSpec(
-		projecttest.WithName("synth-local"),
-		projecttest.WithVersion("1.0.0"),
-		projecttest.WithRelease("%autorelease"),
-		projecttest.WithBuildArch(projecttest.NoArch),
-	)
-
-	// Pre-baked lock file with a stale fingerprint. The overlay in the
-	// component config changes the runtime fingerprint, so dirty detection
-	// will fire and add a synthetic commit.
-	const lockFileContent = `input-fingerprint = "pre-baked-for-test"
-`
-
-	project := projecttest.NewDynamicTestProject(
-		projecttest.AddSpec(spec),
-		projecttest.AddComponent(localComponentConfig("synth-local",
-			projectconfig.ComponentOverlay{
-				Type:        projectconfig.ComponentOverlayAddSpecTag,
-				Description: "Add overlay to trigger dirty detection",
-				Tag:         "BuildRequires",
-				Value:       "dirty-dep",
-			},
-		)),
-		projecttest.UseTestDefaultConfigs(),
-		projecttest.AddFile("locks/synth-local.lock", lockFileContent),
-		projecttest.WithGitRepo(),
-	)
-
-	results := projecttest.NewProjectTest(
-		project,
-		[]string{"component", "render", "synth-local", "-o", "project/SPECS"},
-		projecttest.WithTestDefaultConfigs(),
-	).RunInContainer(t)
-
-	// Verify JSON output reports success.
-	output := results.GetJSONResult()
-	require.Len(t, output, 1, "Expected one component in the output")
-	assert.Equal(t, "ok", output[0]["status"],
-		"Local component with lock file should render ok")
-
-	// Verify rendered spec exists and has rpmautospec processing.
-	renderedSpecPath := results.GetProjectOutputPath("SPECS", "s", "synth-local", "synth-local.spec")
-	require.FileExists(t, renderedSpecPath)
-
-	content, err := os.ReadFile(renderedSpecPath)
-	require.NoError(t, err)
-
-	contentStr := string(content)
-
-	// rpmautospec should have processed %autorelease using the synthetic
-	// git history (which includes the dirty-detected commit from the
-	// pre-baked lock file's stale fingerprint).
-	assert.Contains(t, contentStr, "## START: Set by rpmautospec",
-		"rpmautospec should have expanded %%autorelease for local component with lock file")
-
-	// The overlay should be applied to the rendered spec, confirming that
-	// dirty detection fired (the overlay changes the runtime fingerprint).
-	assert.Contains(t, contentStr, "BuildRequires: dirty-dep",
-		"Overlay should be applied to rendered spec")
-}
-
 // TestRenderUpstreamFromLocalDistGit verifies that the synthetic dist-git
 // pipeline produces correct Release and changelog values by cloning from a
 // controlled local file:// bare repo with a known commit history.
@@ -630,13 +552,12 @@ func TestRenderLocalSpecWithSyntheticHistory(t *testing.T) {
 // Setup:
 //
 //	Upstream dist-git (3 commits): C1(v1.0.0) → C2(v1.1.0) → C3(add patch)
-//	Project lock file (3 fingerprint changes): fp0 (on C1), fp1 (on C3), fp2 (on C3)
-//	Dirty detection: runtime fingerprint ≠ fp2 → 1 extra synthetic commit
+//	Project lock file (3 changes): S0 (on C1), S1 (on C3), S2 (on C3)
 //
 //	S0 references C1 (pre-version-bump), so interleaving places it between
 //	C1 and C2. The remaining synthetic commits reference C3 (HEAD) and are
-//	placed after C3: C1 → S0 → C2 → C3 → S1 → S2 → S3(dirty)
-//	rpmautospec resets release on Version change (C2), giving Release = 5.
+//	placed after C3: C1 → S0 → C2 → C3 → S1 → S2
+//	rpmautospec resets release on Version change (C2), giving Release = 4.
 //	Crucially, S0 sits before the reset and does NOT inflate v1.1's release.
 //
 // The bare repo is created inside the container script because
@@ -732,14 +653,13 @@ dist-git-branch = "main"
 
 	// The script:
 	// 1. Creates the upstream bare repo with 3 controlled commits
-	// 2. Commits the lock file three times with different fingerprints to
+	// 2. Commits the lock file three times to
 	//    simulate a realistic lifecycle: import on v1.0 → overlay on v1.0 →
 	//    update to v1.1 → overlay on v1.1
 	// 3. Renders and captures output
 	//
-	// This produces 3 fingerprint changes + 1 dirty detection = 4 synthetic
-	// commits. S0 references C1 (v1.0 era) and is interleaved before C2.
-	// S1, S2, S3 reference C3 and go on top. Total = 7 commits, Release = 5.
+	// This produces 3 synthetic commits. S0 references C1 (v1.0 era) and is
+	// interleaved before C2. S1 and S2 reference C3 and go on top.
 	testScript := `
 set -ex
 
@@ -775,7 +695,7 @@ mkdir -p /workdir/upstream-repo
 git clone --bare "$WORK" /workdir/upstream-repo/test-pkg.git
 cd /workdir
 
-# --- Create lock file with multiple fingerprint changes ---
+# --- Create lock file history ---
 # This simulates a realistic lifecycle:
 #   1. Import while still on v1.0 (upstream-commit = C1)
 #   2. Update to latest (upstream-commit = C3)
@@ -788,23 +708,20 @@ cd project
 # the version bump at C2, proving it doesn't inflate v1.1's release.
 cat > locks/test-pkg.lock <<EOF
 upstream-commit = "$FIRST_COMMIT"
-input-fingerprint = "fp0-imported-on-v1"
 EOF
 git add locks/test-pkg.lock
 git -c commit.gpgsign=false commit -m "Import test-pkg at v1.0"
 
-# Lock commit 1: updated to latest upstream (fingerprint fp1)
+# Lock commit 1: updated to latest upstream
 cat > locks/test-pkg.lock <<EOF
 upstream-commit = "$HEAD_COMMIT"
-input-fingerprint = "fp1-updated-to-latest"
 EOF
 git add locks/test-pkg.lock
 git -c commit.gpgsign=false commit -m "Update test-pkg to v1.1"
 
-# Lock commit 2: simulated overlay addition (fingerprint fp2)
+# Lock commit 2: simulated lock refresh
 cat > locks/test-pkg.lock <<EOF
 upstream-commit = "$HEAD_COMMIT"
-input-fingerprint = "fp2-added-buildrequires"
 EOF
 git add locks/test-pkg.lock
 git -c commit.gpgsign=false commit -m "Update lock: add BuildRequires overlay"
@@ -864,26 +781,25 @@ azldev -C project -v component render test-pkg -o project/SPECS --output-format 
 	//
 	// Expected release calculation:
 	// S0 references C1 (v1.0 era), so interleaving places it between C1 and C2.
-	// S1, S2 reference C3 (HEAD), so they go on top after C3.
-	// S3 is dirty detection (also references C3).
-	//   C1 → S0(fp0) → C2 → C3 → S1(fp1) → S2(fp2) → S3(dirty)
+	// S1 and S2 reference C3 (HEAD), so they go on top after C3.
+	//   C1 → S0 → C2 → C3 → S1 → S2
 	// rpmautospec resets release on Version change (C2 bumps 1.0.0 → 1.1.0):
-	//   C2 = release 1 (reset), C3 = 2, S1 = 3, S2 = 4, S3 = 5
+	//   C2 = release 1 (reset), C3 = 2, S1 = 3, S2 = 4
 	// S0 sits before the reset — it does NOT count toward v1.1's release.
 	releasePattern := regexp.MustCompile(`release_number = (\d+);`)
 	releaseMatch := releasePattern.FindStringSubmatch(contentStr)
 	require.NotEmpty(t, releaseMatch,
 		"Should find release_number in rpmautospec Lua block")
-	assert.Equal(t, "5", releaseMatch[1],
-		"Release should be 5: S0 is before the version bump and must not inflate v1.1's release "+
-			"(commits after reset: C2=1, C3=2, S1=3, S2=4, S3=5)")
+	assert.Equal(t, "4", releaseMatch[1],
+		"Release should be 4: S0 is before the version bump and must not inflate v1.1's release "+
+			"(commits after reset: C2=1, C3=2, S1=3, S2=4)")
 
 	// %autochangelog should be expanded to real entries from the controlled history.
 	assert.NotContains(t, contentStr, "%autochangelog",
 		"%%autochangelog should be expanded to real entries")
 
 	// The changelog should contain our controlled commit messages in
-	// newest-first order. Synthetic commits (S1, S2, S3) appear before
+	// newest-first order. Synthetic commits (S1, S2) appear before
 	// upstream commits (C3, C2, C1) because interleaving places them on top.
 	assert.Contains(t, contentStr, "Add fix.patch for build issue",
 		"Changelog should contain the third commit message")

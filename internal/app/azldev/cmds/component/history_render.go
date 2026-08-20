@@ -13,9 +13,9 @@ import (
 )
 
 // sortHistoryResults orders results "most-customized first": highest
-// customization count first, then fingerprint-changes, then alphabetical by name.
+// customization count first, then lock-changes, then alphabetical by name.
 // Customizations is the most direct signal of human attention paid to a
-// component (and it's deterministic / fast); fingerprint-changes and the name
+// component (and it's deterministic / fast); lock-changes and the name
 // tie-break it for stable output.
 func sortHistoryResults(results []HistoryResult) {
 	sort.SliceStable(results, func(left, right int) bool {
@@ -23,8 +23,8 @@ func sortHistoryResults(results []HistoryResult) {
 			return results[left].Customizations > results[right].Customizations
 		}
 
-		if results[left].FingerprintChanges != results[right].FingerprintChanges {
-			return results[left].FingerprintChanges > results[right].FingerprintChanges
+		if results[left].LockChanges != results[right].LockChanges {
+			return results[left].LockChanges > results[right].LockChanges
 		}
 
 		return results[left].Name < results[right].Name
@@ -78,12 +78,12 @@ func renderCardView(writer io.Writer, result HistoryResult) {
 
 	fmt.Fprintf(writer, "  TOML commits:   %d%s%s\n", result.TomlCommits, sharedNote, latestNote)
 	fmt.Fprintf(writer, "  Customizations: %d\n", result.Customizations)
-	fmt.Fprintf(writer, "  FP changes:     %d\n", result.FingerprintChanges)
+	fmt.Fprintf(writer, "  Lock changes:   %d\n", result.LockChanges)
 
-	// The per-commit FingerprintChangeDetails are populated for a single
+	// The per-commit LockChangeDetails are populated for a single
 	// surviving component but omitted from the card to keep it scannable;
 	// point the user at -O json so the changelog records aren't a dead end.
-	if result.FingerprintChanges > 0 {
+	if result.LockChanges > 0 {
 		fmt.Fprintln(writer, "                  (run with -O json for per-commit details)")
 	}
 

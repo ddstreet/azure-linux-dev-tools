@@ -45,17 +45,10 @@ func NewChangedCmd() *cobra.Command {
 		Short: "Detect which components changed between two git refs",
 		Long: `Compare component lock files and rendered sources between two git refs to
 determine which components changed. For each component, reports whether its
-input fingerprint changed (any change) and whether its rendered sources file
-changed (sources change).
+resolved upstream commit changed and whether its rendered sources file changed.
 
 This is useful for CI/CD pipelines to determine which components need to be
 rebuilt or have their lookaside tarballs re-uploaded after a PR merge.
-
-Fails with an error if any component's fingerprint is unchanged between refs
-but its rendered sources file drifted. This combination cannot occur from a
-clean render -- it usually means the rendered sources were edited by hand (a
-cache-poisoning vector if blindly uploaded) or the renderer is non-
-deterministic.
 
 Note: component selection and directory paths (lock-dir, rendered-specs-dir)
 are resolved from the current checkout's configuration, not from the compared
@@ -175,24 +168,6 @@ func ChangedComponents(
 		return nil, err
 	}
 
-	if len(ctx.integrityViolations) > 0 {
-		// Sort for deterministic output -- the slice is appended in
-		// component-resolution order, which depends on map iteration. CI
-		// logs and snapshot tests need a stable error string.
-		sort.Strings(ctx.integrityViolations)
-
-		quotedIntegrityViolations := make([]string, len(ctx.integrityViolations))
-		for idx, componentName := range ctx.integrityViolations {
-			quotedIntegrityViolations[idx] = fmt.Sprintf("%#q", componentName)
-		}
-
-		return nil, fmt.Errorf(
-			"found %d component(s) with unchanged fingerprint but drifted rendered sources "+
-				"(run 'azldev component render' and commit the result): %s",
-			len(ctx.integrityViolations),
-			strings.Join(quotedIntegrityViolations, ", "))
-	}
-
 	return results, nil
 }
 
@@ -202,12 +177,6 @@ type changedContext struct {
 	repoRoot         string
 	lockRelDir       string
 	renderedSpecsDir string
-	// integrityViolations collects components whose fingerprint is
-	// unchanged between refs but whose rendered sources file drifted.
-	// This indicates manual tampering with the rendered output (a cache
-	// poisoning vector -- see [classifyAndCompareSources]) or a renderer
-	// non-determinism bug.
-	integrityViolations []string
 }
 
 // newChangedContext opens the project repository and resolves paths.
@@ -255,11 +224,7 @@ type classifyOpts struct {
 }
 
 // classifyAndCompareSources classifies a component and compares its rendered
-// sources file. Returns the result and whether it should be included in
-// output. When an unchanged component shows a drifted sources file, the
-// component name is appended to ctx.integrityViolations so [ChangedComponents]
-// can fail the run -- fingerprint-unchanged + sources-drifted is a cache-
-// poisoning vector (see security review of `comp changed`).
+// sources file. Returns the result and whether it should be included in output.
 func classifyAndCompareSources(
 	name string,
 	fromLocks, toLocks map[string]lockfile.ComponentLock,
@@ -279,16 +244,6 @@ func classifyAndCompareSources(
 	}
 
 	result.SourcesChange = sourcesChange
-
-	// Record an integrity violation only when both refs have a lock AND the
-	// two fingerprints actually agree. The classifier reports unchanged for
-	// the no-lock-on-either-side case too (e.g. an arbitrary --from/--to pair
-	// where the component didn't exist as a managed package), but there's no
-	// fingerprint to vouch for the rendered sources in that case -- a sources
-	// diff is just a sources diff, not cache-poisoning evidence.
-	if result.SourcesChange && haveMatchingFingerprints(name, fromLocks, toLocks) {
-		ctx.integrityViolations = append(ctx.integrityViolations, name)
-	}
 
 	// Filter unchanged components from broad-scan output unless their
 	// sources changed or the caller asked to see them.
@@ -420,7 +375,7 @@ func buildNonConfigResults(
 }
 
 // classifyComponent determines the change type for a single component by
-// comparing its presence and fingerprint in the from/to lock maps.
+// comparing its presence and upstream commit in the from/to lock maps.
 func classifyComponent(
 	name string,
 	fromLocks, toLocks map[string]lockfile.ComponentLock,
@@ -441,32 +396,12 @@ func classifyComponent(
 	case !inTo:
 		result.ChangeType = changeTypeDeleted
 	default:
-		if fromLock.InputFingerprint != toLock.InputFingerprint {
+		if fromLock.UpstreamCommit != toLock.UpstreamCommit {
 			result.ChangeType = changeTypeChanged
 		}
 	}
 
 	return result
-}
-
-// haveMatchingFingerprints reports whether a lock exists at both refs and
-// the two recorded InputFingerprint values are equal AND non-empty. Used to
-// gate integrity-violation reporting so that components which simply lack
-// locks on one or both sides aren't accused of fingerprint-vs-sources drift.
-// The non-empty guard rejects the degenerate "" == "" case: two locks
-// missing the input-fingerprint field aren't a verified-fingerprint match,
-// they're an unverified pair, and a sources diff between them is just a
-// sources diff -- not cache-poisoning evidence.
-func haveMatchingFingerprints(
-	name string,
-	fromLocks, toLocks map[string]lockfile.ComponentLock,
-) bool {
-	fromLock, inFrom := fromLocks[name]
-	toLock, inTo := toLocks[name]
-
-	return inFrom && inTo &&
-		fromLock.InputFingerprint != "" &&
-		fromLock.InputFingerprint == toLock.InputFingerprint
 }
 
 // compareSources compares the rendered sources file between two git trees.

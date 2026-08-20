@@ -12,7 +12,6 @@ import (
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
-	"github.com/microsoft/azure-linux-dev-tools/internal/fingerprint"
 	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
@@ -23,10 +22,9 @@ import (
 // UpdateComponentOptions holds options for the component update command.
 type UpdateComponentOptions struct {
 	ComponentFilter components.ComponentFilter
-	// CheckOnly runs the full update pipeline (resolve identities,
-	// recompute fingerprints) but does not write lock files or prune
-	// orphans. Returns a non-nil error when any component would be
-	// changed or any lock file would be pruned. Intended for CI gates:
+	// CheckOnly resolves upstream commits but does not write lock files or
+	// prune orphans. Returns a non-nil error when any component would change
+	// or any lock file would be pruned. Intended for CI gates:
 	// `azldev component update -a --check-only` exits 0 when locks are
 	// fresh and 1 when something is stale.
 	CheckOnly bool
@@ -43,11 +41,10 @@ func NewUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Resolve and lock source identities for components",
-		Long: `Resolve source identities for components and write them to per-component lock files.
+		Long: `Resolve upstream commits for components and write them to per-component lock files.
 
 For upstream components, this resolves the effective commit hash using the
 distro snapshot time or explicit pin, then records it in locks/<name>.lock.
-For local components, this computes a content hash of the spec directory.
 Subsequent commands (render, build) use the locked state for deterministic,
 reproducible results.
 
@@ -83,9 +80,9 @@ any component is stale or any lock would be pruned. Intended for CI gates.`,
 	components.AddComponentFilterOptionsToCommand(cmd, &options.ComponentFilter)
 
 	cmd.Flags().BoolVar(&options.CheckOnly, "check-only", false,
-		"resolve identities and recompute fingerprints but do not write lock files "+
-			"or prune orphans. Exits 0 when nothing would change and 1 when any "+
-			"component is stale (or, with --all-components, when any orphan lock "+
+		"resolve upstream commits but do not write lock files or prune orphans. "+
+			"Exits 0 when nothing would change and 1 when any component is stale "+
+			"(or, with --all-components, when any orphan lock "+
 			"would be pruned). Intended for CI gates")
 	// Update always skips lock validation (it's the lock writer), so the
 	// flag is meaningless here. Hide it to avoid confusion.
@@ -99,24 +96,13 @@ type UpdateResult struct {
 	Component      string `json:"component"                table:",sortkey"`
 	UpstreamCommit string `json:"upstreamCommit,omitempty"`
 	PreviousCommit string `json:"previousCommit,omitempty" table:"-"`
-	// Changed is set by checkLockChanged (commit diff) or saveComponentLocks (fingerprint diff).
-	Changed    bool   `json:"changed"`
-	Skipped    bool   `json:"skipped,omitempty"`
-	SkipReason string `json:"skipReason,omitempty" table:",omitempty"`
-	Error      string `json:"error,omitempty"      table:",omitempty"`
-
-	// config is the resolved component config, used for fingerprint computation.
-	// Not serialized — only needed during the update pipeline.
-	config *projectconfig.ComponentConfig `json:"-" table:"-"`
-
-	// sourceIdentity is the opaque identity string from the source provider.
-	// For upstream components this is the resolved commit hash (same as UpstreamCommit);
-	// for local components this is a content hash of the spec directory.
-	// Used as SourceIdentity input for fingerprint computation.
-	sourceIdentity string `json:"-" table:"-"`
+	Changed        bool   `json:"changed"`
+	Skipped        bool   `json:"skipped,omitempty"`
+	SkipReason     string `json:"skipReason,omitempty"     table:",omitempty"`
+	Error          string `json:"error,omitempty"          table:",omitempty"`
 }
 
-// UpdateComponents resolves source identities for all selected components and
+// UpdateComponents resolves upstream commits for all selected components and
 // writes the results to per-component lock files under locks/.
 // Lock validation is always skipped regardless of the caller's SkipLockValidation
 // value — update is the lock writer.
@@ -134,23 +120,28 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 		return nil, fmt.Errorf("resolving components:\n%w", err)
 	}
 
-	comps := resolved.Components()
-	if len(comps) == 0 && !options.ComponentFilter.IncludeAllComponents {
+	allComps := resolved.Components()
+	if len(allComps) == 0 && !options.ComponentFilter.IncludeAllComponents {
 		return nil, errors.New("no components matched the filter")
 	}
 
-	// Resolve upstream commits in parallel (no-op for empty list).
+	upstreamComps := make([]components.Component, 0, len(allComps))
+	for _, comp := range allComps {
+		// Locks now represent only an upstream commit, so local components
+		// have no state for update to persist. Their filesystem content is
+		// consumed directly by render and build instead of being summarized
+		// into a lock fingerprint.
+		if comp.GetConfig().Spec.SourceType == projectconfig.SpecSourceTypeUpstream {
+			upstreamComps = append(upstreamComps, comp)
+		}
+	}
+
 	store := env.LockStore()
 	if store == nil {
 		return nil, errors.New("no project directory configured; cannot update lock files")
 	}
 
-	// Every update now derives a change from the component's real inputs or
-	// resolved source identity. There is deliberately no metadata-only rebuild
-	// counter: callers that need a rebuild must make the triggering input change
-	// explicit, so fingerprints and release history continue to explain why the
-	// component changed.
-	results := resolveSourceIdentitiesParallel(env, comps, store)
+	results := resolveUpstreamCommitsParallel(env, upstreamComps, store)
 
 	// Don't save if the context was cancelled (Ctrl+C).
 	if env.Context().Err() != nil {
@@ -163,13 +154,10 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 	}
 
 	// Write per-component lock files only on full success.
-	// saveComponentLocks may flip Changed for fingerprint-only diffs.
-	// In --check-only mode it computes everything but skips disk writes.
-	if err := saveComponentLocks(env, store, results, options.CheckOnly); err != nil {
+	if err := saveComponentLocks(store, results, options.CheckOnly); err != nil {
 		return results, err
 	}
 
-	// Log summary after save so Changed counts include fingerprint-only diffs.
 	// Skipped in --check-only mode -- the "changed" counter would lie about a
 	// run that wrote nothing, and the structured error returned below already
 	// names every affected component.
@@ -182,7 +170,7 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 	// spec-glob-discovered components that aren't in config directly.
 	// Lock files are version controlled, so pruning is safe even if the
 	// resolved set is empty (e.g., all components removed from config).
-	wouldPrune, orphanErr := handleOrphanLocks(store, comps, options)
+	wouldPrune, orphanErr := handleOrphanLocks(store, allComps, options)
 	if orphanErr != nil {
 		return results, orphanErr
 	}
@@ -282,15 +270,8 @@ func checkOnlyResult(
 		strings.Join(parts, "; "))
 }
 
-// saveComponentLocks recomputes fingerprints and writes lock files for all
-// resolved components. A lock file is saved when either the upstream commit
-// or the input fingerprint has changed. The fingerprint is recomputed on every
-// update, so config/overlay changes are detected even when the upstream commit
-// stays the same.
-//
-// When checkOnly is true, fingerprints are still recomputed and Changed flags
-// are still set on the results, but no lock files are written to disk.
-func saveComponentLocks(env *azldev.Env, store *lockfile.Store, results []UpdateResult, checkOnly bool) error {
+// saveComponentLocks writes lock files for changed upstream commits.
+func saveComponentLocks(store *lockfile.Store, results []UpdateResult, checkOnly bool) error {
 	saved := make([]string, 0, len(results))
 
 	// Log partially-saved components on any error so the user knows which
@@ -308,7 +289,7 @@ func saveComponentLocks(env *azldev.Env, store *lockfile.Store, results []Update
 			continue
 		}
 
-		written, err := updateComponentLock(env, store, &results[idx], checkOnly)
+		written, err := updateComponentLock(store, &results[idx], checkOnly)
 		if err != nil {
 			retErr = err
 
@@ -323,57 +304,21 @@ func saveComponentLocks(env *azldev.Env, store *lockfile.Store, results []Update
 	return nil
 }
 
-// updateComponentLock recomputes the fingerprint for a single component and
-// writes its lock file if anything changed. Returns true when the lock file
-// was written.
-//
-// When checkOnly is true, the fingerprint is still recomputed and result.Changed
-// is still flipped if anything would change, but no lock file is written. The
-// returned 'written' flag is always false in check-only mode.
-func updateComponentLock(env *azldev.Env, store *lockfile.Store, result *UpdateResult, checkOnly bool) (bool, error) {
+// updateComponentLock writes one changed lock file. The returned 'written'
+// flag is always false in check-only mode.
+func updateComponentLock(
+	store *lockfile.Store, result *UpdateResult, checkOnly bool,
+) (bool, error) {
+	if !result.Changed {
+		return false, nil
+	}
+
 	lock, lockErr := store.GetOrNew(result.Component)
 	if lockErr != nil {
 		return false, fmt.Errorf("loading lock for %#q:\n%w", result.Component, lockErr)
 	}
 
 	lock.UpstreamCommit = result.UpstreamCommit
-
-	// Recompute fingerprint from resolved config + lock state.
-	if result.config == nil {
-		return false, fmt.Errorf("no resolved config for %#q; cannot compute fingerprint", result.Component)
-	}
-
-	// Resolve per-component distro for ReleaseVer, matching the
-	// per-component resolution used by render/build/prepare-sources.
-	releaseVer, distroErr := resolveReleaseVer(env, result.config)
-	if distroErr != nil {
-		return false, fmt.Errorf("resolving distro for %#q:\n%w", result.Component, distroErr)
-	}
-
-	identity, fpErr := fingerprint.ComputeIdentity(
-		env.FS(),
-		*result.config,
-		releaseVer,
-		fingerprint.IdentityOptions{
-			SourceIdentity: result.sourceIdentity,
-		},
-	)
-	if fpErr != nil {
-		return false, fmt.Errorf("computing fingerprint for %#q:\n%w", result.Component, fpErr)
-	}
-
-	// Mark as changed if fingerprint differs (catches config/overlay edits
-	// even when the upstream commit is unchanged). This is the user-visible
-	// "changed" flag — it drives render/build decisions.
-	if lock.InputFingerprint != identity.Fingerprint {
-		result.Changed = true
-	}
-
-	lock.InputFingerprint = identity.Fingerprint
-
-	if !result.Changed {
-		return false, nil
-	}
 
 	// In check-only mode the caller wants to know what *would* change without
 	// touching disk. Skip the write but keep result.Changed flipped so the
@@ -390,8 +335,7 @@ func updateComponentLock(env *azldev.Env, store *lockfile.Store, result *UpdateR
 }
 
 // checkUpdateErrors returns an error if any component failed to resolve.
-// Does NOT log a summary — call [logUpdateSummary] after saves are complete
-// so that Changed counts include fingerprint-only diffs.
+// Does NOT log a summary — call [logUpdateSummary] after saves are complete.
 func checkUpdateErrors(results []UpdateResult) error {
 	var failedNames []string
 
@@ -414,8 +358,7 @@ func checkUpdateErrors(results []UpdateResult) error {
 	return nil
 }
 
-// logUpdateSummary logs the final update summary. Called after saveComponentLocks
-// so that Changed counts reflect fingerprint-only diffs.
+// logUpdateSummary logs the final update summary.
 func logUpdateSummary(results []UpdateResult) {
 	var changed, skipped, upToDate int
 
@@ -452,14 +395,14 @@ func filterDisplayResults(results []UpdateResult) []UpdateResult {
 	return tableResults
 }
 
-func resolveSourceIdentitiesParallel(
+func resolveUpstreamCommitsParallel(
 	env *azldev.Env,
 	comps []components.Component,
 	store *lockfile.Store,
 ) []UpdateResult {
 	results := make([]UpdateResult, len(comps))
 
-	progressEvent := env.StartEvent("Resolving source identities", "count", len(comps))
+	progressEvent := env.StartEvent("Resolving upstream commits", "count", len(comps))
 	defer progressEvent.End()
 
 	workerEnv, cancel := env.WithCancel()
@@ -476,8 +419,7 @@ func resolveSourceIdentitiesParallel(
 		parallel[idx] = parallelItem{idx: idx, comp: comp}
 	}
 
-	// Each resolution may involve network I/O (upstream git clone) or
-	// filesystem traversal (local spec-dir hashing), so we parallelize.
+	// Each resolution may involve network I/O, so we parallelize.
 	parmapResults := parmap.Map(
 		workerEnv,
 		env.FastConcurrency(),
@@ -486,7 +428,7 @@ func resolveSourceIdentitiesParallel(
 			progressEvent.SetProgress(int64(done), int64(len(comps)))
 		},
 		func(ctx context.Context, item parallelItem) struct{} {
-			resolveAndRecordIdentity(ctx, workerEnv, cancel, item.comp, store, &results[item.idx])
+			resolveAndRecordCommit(ctx, workerEnv, cancel, item.comp, store, &results[item.idx])
 
 			return struct{}{}
 		},
@@ -511,9 +453,8 @@ type parallelItem struct {
 	comp components.Component
 }
 
-// resolveAndRecordIdentity resolves a single component's source identity and
-// records the result. Called from a parmap worker in [resolveSourceIdentitiesParallel].
-func resolveAndRecordIdentity(
+// resolveAndRecordCommit resolves one component's upstream commit.
+func resolveAndRecordCommit(
 	ctx context.Context,
 	env *azldev.Env,
 	cancel context.CancelFunc,
@@ -522,12 +463,10 @@ func resolveAndRecordIdentity(
 	result *UpdateResult,
 ) {
 	// Drop populated lock data so the source provider re-resolves
-	// from upstream (snapshot/HEAD or pinned commit) or re-hashes
-	// local spec content instead of short-circuiting with stale
-	// locked values. We're about to overwrite the lock anyway.
+	// from upstream instead of short-circuiting with the locked value.
 	comp.GetConfig().Locked = nil
 
-	identity, resolveErr := resolveOneSourceIdentity(ctx, env, comp)
+	commit, resolveErr := resolveUpstreamCommit(ctx, env, comp)
 	if resolveErr != nil {
 		result.Error = resolveErr.Error()
 
@@ -537,14 +476,7 @@ func resolveAndRecordIdentity(
 		return
 	}
 
-	result.sourceIdentity = identity
-	result.config = comp.GetConfig()
-
-	// For upstream components, the identity IS the commit hash.
-	// For local components, UpstreamCommit stays empty.
-	if comp.GetConfig().Spec.SourceType == projectconfig.SpecSourceTypeUpstream {
-		result.UpstreamCommit = identity
-	}
+	result.UpstreamCommit = commit
 
 	// Check existing lock to determine if the component changed.
 	checkLockChanged(store, comp.GetName(), result)
@@ -553,10 +485,7 @@ func resolveAndRecordIdentity(
 // checkLockChanged compares the resolved upstream commit against the existing
 // lock file to determine if the component changed. For new components (no lock
 // file), marks as Changed unconditionally. For existing locks, compares
-// UpstreamCommit values — for local components both sides are empty, so
-// Changed stays false. The fingerprint comparison in [saveComponentLocks] is
-// the definitive source of truth and will flip Changed to true when content
-// actually changed.
+// UpstreamCommit values.
 func checkLockChanged(store *lockfile.Store, componentName string, result *UpdateResult) {
 	exists, existsErr := store.Exists(componentName)
 	if existsErr != nil {
@@ -582,7 +511,7 @@ func checkLockChanged(store *lockfile.Store, componentName string, result *Updat
 	result.Changed = existingLock.UpstreamCommit != result.UpstreamCommit
 }
 
-func resolveOneSourceIdentity(
+func resolveUpstreamCommit(
 	ctx context.Context,
 	env *azldev.Env,
 	comp components.Component,
@@ -599,30 +528,12 @@ func resolveOneSourceIdentity(
 		return "", fmt.Errorf("creating source manager for %#q:\n%w", componentName, err)
 	}
 
-	identity, err := sourceManager.ResolveSourceIdentity(ctx, comp)
+	commit, err := sourceManager.ResolveSourceIdentity(ctx, comp)
 	if err != nil {
-		return "", fmt.Errorf("resolving identity for %#q:\n%w", componentName, err)
+		return "", fmt.Errorf("resolving upstream commit for %#q:\n%w", componentName, err)
 	}
 
-	slog.Debug("Resolved source identity", "component", componentName, "identity", identity)
+	slog.Debug("Resolved upstream commit", "component", componentName, "commit", commit)
 
-	return identity, nil
-}
-
-// resolveReleaseVer resolves the distro release version for a component,
-// respecting per-component distro overrides. Falls back to the project's
-// default distro when the component doesn't specify one — matching the
-// resolution logic in sourceproviders.ResolveDistro.
-func resolveReleaseVer(env *azldev.Env, config *projectconfig.ComponentConfig) (string, error) {
-	ref := config.Spec.UpstreamDistro
-	if ref.Name == "" {
-		ref = env.Config().Project.DefaultDistro
-	}
-
-	_, distroVer, err := env.ResolveDistroRef(ref)
-	if err != nil {
-		return "", fmt.Errorf("resolving distro ref %#q:\n%w", ref.Name, err)
-	}
-
-	return distroVer.ReleaseVer, nil
+	return commit, nil
 }

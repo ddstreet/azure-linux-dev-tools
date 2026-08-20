@@ -98,18 +98,6 @@ description: "Instructions for working on the azldev Go codebase. IMPORTANT: Alw
     }
     ```
 
-## Component Fingerprinting — `fingerprint:"-"` Tags
-
-Structs in `internal/projectconfig/` are hashed by `hashstructure.Hash()` to detect component changes. Fields **included by default** (safe: false positive > false negative).
-
-When adding a new field to a fingerprinted struct, ask: **"Does changing this field change the build output?"**
-- **Yes** (build flags, spec source, defines, etc.) → do nothing, included automatically.
-- **No** (human docs, scheduling hints, CI policy, metadata, back-references) → add `fingerprint:"-"` to the struct tag and register the exclusion in `expectedExclusions` in `internal/projectconfig/fingerprint_test.go`.
-
-If a parent struct field is already excluded (e.g. `Failure ComponentBuildFailureConfig ... fingerprint:"-"`), do **not** also tag the inner struct's fields — `hashstructure` skips the entire subtree.
-
-Run `mage unit` to verify — the guard test will catch unregistered exclusions or missing tags.
-
 ### Cmdline Returns
 
 CLI commands should return meaningful structured results. azldev has output formatting helpers to facilitate this (for example, `RunFunc*` wrappers handle formatting, so callers typically should not call `reflectable.FormatValue` directly).
@@ -131,12 +119,10 @@ Components can override the project-default distro via `Spec.UpstreamDistro`. Th
 |------|------|---------|
 | Project-default distro (release ver, mock config) | `env.Distro()` | `(DistroDefinition, DistroVersionDefinition, error)` |
 | Per-component distro (for source providers) | `sourceproviders.ResolveDistro(env, comp)` | `ResolvedDistro` (includes ref, definition, version) |
-| Per-component release version only (for fingerprints) | Read `distroVer.ReleaseVer` from the resolved distro | `string` |
 
 **When to use which:**
 - **`env.Distro()`** — safe when all components share the same distro (e.g., iterating over results in `saveComponentLocks`). Breaks if components override the distro.
 - **`sourceproviders.ResolveDistro(env, comp)`** — use when you need the full distro context for a specific component (snapshot time, dist-git branch, lookaside URI). This is what `resolveOneSourceIdentity` uses to create the source manager.
-- **Per-component release version** — when computing fingerprints per-component, resolve the distro per-component to get the correct `ReleaseVer`. Using the project-default release version is wrong when component-level distro overrides exist.
 
 ## Archive Overlay Invariants
 

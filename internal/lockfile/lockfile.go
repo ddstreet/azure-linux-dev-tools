@@ -28,13 +28,7 @@ const lockFileExtension = ".lock"
 type ComponentLock struct {
 	// UpstreamCommit is the current resolved upstream commit hash.
 	// Updated by 'component update' when upstream sources are re-resolved.
-	// Empty for local components.
 	UpstreamCommit string `toml:"upstream-commit,omitempty"`
-
-	// InputFingerprint is the hash of all render inputs (config, overlays,
-	// upstream-commit, distro release version). Recomputed on
-	// every update. Used to detect when inputs have changed.
-	InputFingerprint string `toml:"input-fingerprint,omitempty"`
 }
 
 // New creates a new empty component lock.
@@ -257,7 +251,8 @@ func FindOrphanLockFiles(
 
 		componentName := strings.TrimSuffix(entryName, lockFileExtension)
 
-		if _, exists := components[componentName]; !exists {
+		component, exists := components[componentName]
+		if !exists || component.Spec.SourceType == projectconfig.SpecSourceTypeLocal {
 			orphans = append(orphans, componentName)
 		}
 	}

@@ -35,7 +35,6 @@ func mustLockPath(t *testing.T, componentName string) string {
 func TestNew(t *testing.T) {
 	lock := lockfile.New()
 	assert.Empty(t, lock.UpstreamCommit)
-	assert.Empty(t, lock.InputFingerprint)
 }
 
 func TestLockPath(t *testing.T) {
@@ -107,7 +106,6 @@ func TestSaveAndLoad(t *testing.T) {
 
 	original := lockfile.New()
 	original.UpstreamCommit = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-	original.InputFingerprint = "sha256:abcdef1234567890"
 
 	require.NoError(t, original.Save(memFS, lockPath))
 
@@ -115,7 +113,6 @@ func TestSaveAndLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", loaded.UpstreamCommit)
-	assert.Equal(t, "sha256:abcdef1234567890", loaded.InputFingerprint)
 }
 
 func TestSaveCreatesDirectory(t *testing.T) {
@@ -171,24 +168,7 @@ func TestSaveOmitsRemovedFields(t *testing.T) {
 	assert.NotContains(t, string(data), "version")
 	assert.NotContains(t, string(data), "import-commit")
 	assert.NotContains(t, string(data), "resolution-input-hash")
-	assert.Contains(t, string(data), "input-fingerprint")
-}
-
-func TestLocalComponentRoundTrip(t *testing.T) {
-	memFS := afero.NewMemMapFs()
-	lockPath, err := lockfile.LockPath(testLockDir, "local-pkg")
-	require.NoError(t, err)
-
-	// Local component: no upstream commit, no import commit.
-	original := lockfile.New()
-	original.InputFingerprint = "sha256:localfp"
-
-	require.NoError(t, original.Save(memFS, lockPath))
-
-	loaded, err := lockfile.Load(memFS, lockPath)
-	require.NoError(t, err)
-	assert.Empty(t, loaded.UpstreamCommit)
-	assert.Equal(t, "sha256:localfp", loaded.InputFingerprint)
+	assert.NotContains(t, string(data), "input-fingerprint")
 }
 
 func TestExists(t *testing.T) {
@@ -250,25 +230,6 @@ func TestMultipleComponentsIndependentFiles(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, name+"-commit", loaded.UpstreamCommit)
 	}
-}
-
-func TestOmitEmptyFields(t *testing.T) {
-	memFS := afero.NewMemMapFs()
-	lockPath, err := lockfile.LockPath(testLockDir, "local-pkg")
-	require.NoError(t, err)
-
-	// Local component: only fingerprint set.
-	lock := lockfile.New()
-	lock.InputFingerprint = "sha256:local"
-
-	require.NoError(t, lock.Save(memFS, lockPath))
-
-	data, err := fileutils.ReadFile(memFS, lockPath)
-	require.NoError(t, err)
-
-	content := string(data)
-	assert.NotContains(t, content, "upstream-commit", "empty upstream-commit should be omitted")
-	assert.Contains(t, content, "input-fingerprint")
 }
 
 // Store tests
@@ -432,23 +393,22 @@ func TestValidateConsistency(t *testing.T) {
 		assert.Contains(t, orphans, "removed-pkg")
 	})
 
-	t.Run("local component with lock is not orphan", func(t *testing.T) {
+	t.Run("local component with lock is orphan", func(t *testing.T) {
 		memFS := afero.NewMemMapFs()
 		store := lockfile.NewStore(memFS, testLockDir)
 
 		lock := lockfile.New()
-		lock.InputFingerprint = "sha256:local-fp"
+		lock.UpstreamCommit = testCommitHash
 
 		require.NoError(t, lock.Save(memFS, mustLockPath(t, "curl")))
 
-		// Component exists but is local — lock is still valid (used for fingerprinting).
 		components := map[string]projectconfig.ComponentConfig{
 			"curl": {Spec: projectconfig.SpecSource{SourceType: projectconfig.SpecSourceTypeLocal}},
 		}
 
 		_, orphans, err := store.ValidateConsistency(components, true)
-		require.NoError(t, err)
-		assert.Empty(t, orphans)
+		require.Error(t, err)
+		assert.Equal(t, []string{"curl"}, orphans)
 	})
 
 	t.Run("local components skipped", func(t *testing.T) {
@@ -542,23 +502,22 @@ func TestPruneOrphans(t *testing.T) {
 		assert.False(t, exists)
 	})
 
-	t.Run("local component lock preserved", func(t *testing.T) {
+	t.Run("local component lock pruned", func(t *testing.T) {
 		memFS := afero.NewMemMapFs()
 		store := lockfile.NewStore(memFS, testLockDir)
 
 		lock := lockfile.New()
-		lock.InputFingerprint = "sha256:local-fp"
+		lock.UpstreamCommit = testCommitHash
 
 		require.NoError(t, lock.Save(memFS, mustLockPath(t, "curl")))
 
-		// Local component — lock still valid for fingerprinting.
 		components := map[string]projectconfig.ComponentConfig{
 			"curl": {Spec: projectconfig.SpecSource{SourceType: projectconfig.SpecSourceTypeLocal}},
 		}
 
 		pruned, err := store.PruneOrphans(components)
 		require.NoError(t, err)
-		assert.Equal(t, 0, pruned, "local component locks should not be pruned")
+		assert.Equal(t, 1, pruned)
 	})
 
 	t.Run("preserves valid locks", func(t *testing.T) {

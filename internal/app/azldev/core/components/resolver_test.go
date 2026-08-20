@@ -793,9 +793,9 @@ value = "Microsoft"
 	assert.Equal(t, projectconfig.OverlayCategoryAZLBrandingPolicy, overlays[0].Metadata.Category)
 }
 
-// When a lock file exists for a component, the resolver should attach all of
-// its data (commit and fingerprint) to the resolved
-// component via the Locked field — without touching the original Spec config.
+// When a lock file exists for a component, the resolver should attach its
+// commit to the resolved component via the Locked field without touching the
+// original Spec config.
 // This is how downstream commands (render, build) get the locked commit.
 func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	env := testutils.NewTestEnv(t)
@@ -811,7 +811,6 @@ func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	// Create a lock file with upstream commit.
 	lock := lockfile.New()
 	lock.UpstreamCommit = "locked-commit-abc123"
-	lock.InputFingerprint = "sha256:test-fingerprint"
 
 	env.WriteLock(t, "curl", lock)
 
@@ -826,7 +825,6 @@ func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	// Locked field should be populated from the lock file.
 	require.NotNil(t, comp.GetConfig().Locked, "Locked should be populated when lock file exists")
 	assert.Equal(t, "locked-commit-abc123", comp.GetConfig().Locked.UpstreamCommit)
-	assert.Equal(t, "sha256:test-fingerprint", comp.GetConfig().Locked.InputFingerprint)
 
 	// Original config field should NOT be modified.
 	assert.Empty(t, comp.GetConfig().Spec.UpstreamCommit,
@@ -946,41 +944,6 @@ func TestFindComponents_LocalComponentNoLockFile(t *testing.T) {
 	require.True(t, ok)
 
 	assert.Nil(t, comp.GetConfig().Locked, "no lock file → Locked must be nil")
-}
-
-// When a lock file exists for a local component (written by a prior 'update'),
-// the resolver should populate Locked with the stored data.
-func TestFindComponents_LocalComponentWithLockFile(t *testing.T) {
-	env := testutils.NewTestEnv(t)
-
-	specPath := "/specs/local-pkg/local-pkg.spec"
-	require.NoError(t, fileutils.WriteFile(env.TestFS, specPath, []byte("Name: local-pkg\n"), fileperms.PrivateFile))
-
-	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
-		Name: "local-pkg",
-		Spec: projectconfig.SpecSource{
-			SourceType: projectconfig.SpecSourceTypeLocal,
-			Path:       specPath,
-		},
-	}
-
-	// Write a lock file for the local component.
-	lock := lockfile.New()
-	lock.InputFingerprint = "sha256:test-local-fingerprint"
-
-	env.WriteLock(t, "local-pkg", lock)
-
-	filter := &components.ComponentFilter{IncludeAllComponents: true}
-
-	resolved, err := components.NewResolver(env.Env).FindComponents(filter)
-	require.NoError(t, err)
-
-	comp, ok := resolved.TryGet("local-pkg")
-	require.True(t, ok)
-
-	require.NotNil(t, comp.GetConfig().Locked, "lock file exists → Locked must be populated")
-	assert.Equal(t, "sha256:test-local-fingerprint", comp.GetConfig().Locked.InputFingerprint)
-	assert.Empty(t, comp.GetConfig().Locked.UpstreamCommit, "local components have no upstream commit")
 }
 
 // A corrupt or unparseable lock file should not silently fall back to

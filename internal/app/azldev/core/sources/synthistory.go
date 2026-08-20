@@ -31,14 +31,14 @@ type CommitMetadata struct {
 	Message     string
 }
 
-// FingerprintChange records a project commit that changed a component's lock file
-// fingerprint. [UpstreamCommit] is the value of the 'upstream-commit' field in the
-// lock file at the point of the change.
-type FingerprintChange struct {
+// LockChange records a project commit that changed a component's lock file.
+// [UpstreamCommit] is the value of the 'upstream-commit' field in the lock file
+// at the point of the change.
+type LockChange struct {
 	CommitMetadata
 
 	// UpstreamCommit is the upstream dist-git commit hash recorded in the lock
-	// file at the time the fingerprint changed.
+	// file at the time of the change.
 	UpstreamCommit string
 }
 
@@ -46,20 +46,18 @@ type FingerprintChange struct {
 // Exactly one of upstreamCommit or syntheticChange is non-nil.
 type interleavedEntry struct {
 	upstreamCommit  *object.Commit
-	syntheticChange *FingerprintChange
+	syntheticChange *LockChange
 }
 
-// FindFingerprintChanges walks the git log of the project repository for commits
-// that changed the given lock file and returns metadata for each commit where the
-// 'input-fingerprint' field changed. Results are sorted chronologically (oldest
-// first).
-func FindFingerprintChanges(
+// FindLockChanges walks the git log of the project repository for commits that
+// changed the given lock file. Results are sorted chronologically (oldest first).
+func FindLockChanges(
 	ctx context.Context,
 	cmdFactory opctx.CmdFactory,
 	projectRepo *gogit.Repository,
 	projectRepoDir string,
 	lockFileRelPath string,
-) ([]FingerprintChange, error) {
+) ([]LockChange, error) {
 	// Get commit metadata (newest-first) for all commits that touched the lock file.
 	metas, err := gitLogFileMetadata(ctx, cmdFactory, projectRepoDir, lockFileRelPath)
 	if err != nil {
@@ -80,6 +78,24 @@ func FindFingerprintChanges(
 
 	for _, meta := range metas {
 		lock, err := lockfile.ShowAtCommit(projectRepo, meta.Hash, lockFileRelPath)
+		if errors.Is(err, object.ErrFileNotFound) {
+			commit, commitErr := projectRepo.CommitObject(plumbing.NewHash(meta.Hash))
+			if commitErr != nil {
+				return nil, fmt.Errorf("failed to resolve lock deletion commit %#q:\n%w",
+					meta.Hash, commitErr)
+			}
+
+			parent, parentErr := commit.Parent(0)
+			if parentErr != nil {
+				return nil, fmt.Errorf("failed to resolve parent of lock deletion commit %#q:\n%w",
+					meta.Hash, parentErr)
+			}
+
+			// Associate a deletion with the pin it removed so the history event
+			// stays at the correct position in the upstream timeline.
+			lock, err = lockfile.ShowAtCommit(projectRepo, parent.Hash.String(), lockFileRelPath)
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to read lock file at commit %#q:\n%w", meta.Hash, err)
 		}
@@ -94,20 +110,12 @@ func FindFingerprintChanges(
 	// Entries are newest-first (from git log order). Reverse to chronological.
 	slices.Reverse(entries)
 
-	// Walk chronologically and detect fingerprint changes.
-	var changes []FingerprintChange
-
-	prevFingerprint := ""
-
+	changes := make([]LockChange, 0, len(entries))
 	for _, change := range entries {
-		if change.lock.InputFingerprint != prevFingerprint {
-			changes = append(changes, FingerprintChange{
-				CommitMetadata: change.meta,
-				UpstreamCommit: change.lock.UpstreamCommit,
-			})
-		}
-
-		prevFingerprint = change.lock.InputFingerprint
+		changes = append(changes, LockChange{
+			CommitMetadata: change.meta,
+			UpstreamCommit: change.lock.UpstreamCommit,
+		})
 	}
 
 	return changes, nil
@@ -120,14 +128,14 @@ func FindFingerprintChanges(
 // last synthetic commit carries the overlay file changes; all others are empty.
 func CommitInterleavedHistory(
 	repo *gogit.Repository,
-	changes []FingerprintChange,
+	changes []LockChange,
 ) error {
 	// No changes means no synthetic commits to create, so skip the whole process.
 	if len(changes) == 0 {
 		return nil
 	}
 
-	// The latest fingerprint change's UpstreamCommit is the commit we're
+	// The latest lock change's UpstreamCommit is the commit we're
 	// pinned to — use it as the upper bound for the upstream walk instead
 	// of HEAD, which may be ahead (e.g., at the branch tip).
 	upstreamCommit := changes[len(changes)-1].UpstreamCommit
@@ -189,11 +197,11 @@ func stageAndCaptureOverlayTree(repo *gogit.Repository) (plumbing.Hash, error) {
 // history are dropped with a warning.
 func buildInterleavedSequence(
 	upstreamCommits []*object.Commit,
-	changes []FingerprintChange,
+	changes []LockChange,
 ) []interleavedEntry {
 	latestUpstream := changes[len(changes)-1].UpstreamCommit
 
-	var interleaved, top []FingerprintChange
+	var interleaved, top []LockChange
 
 	for idx := range changes {
 		switch changes[idx].UpstreamCommit {
@@ -209,7 +217,7 @@ func buildInterleavedSequence(
 	}
 
 	// Build a lookup from upstream-commit hash → synthetic commits.
-	interleavedByUpstream := make(map[string][]FingerprintChange)
+	interleavedByUpstream := make(map[string][]LockChange)
 
 	for i := range interleaved {
 		hash := interleaved[i].UpstreamCommit
@@ -236,7 +244,7 @@ func buildInterleavedSequence(
 	// Remaining interleaved changes reference upstream commits not found in
 	// the dist-git history — drop them with a warning. Will be useful for when we switch branches.
 	for hash, orphaned := range interleavedByUpstream {
-		slog.Warn("Upstream commit referenced by fingerprint change not found in dist-git history; "+
+		slog.Warn("Upstream commit referenced by lock change not found in dist-git history; "+
 			"dropping",
 			"upstreamCommit", hash,
 			"count", len(orphaned))
@@ -343,11 +351,11 @@ func replayUpstreamCommit(
 	return hash, nil
 }
 
-// createSyntheticCommit creates a synthetic commit from a [FingerprintChange],
+// createSyntheticCommit creates a synthetic commit from a [LockChange],
 // logging progress information.
 func createSyntheticCommit(
 	repo *gogit.Repository,
-	change *FingerprintChange,
+	change *LockChange,
 	treeHash, parentHash plumbing.Hash,
 	syntheticIdx, syntheticCount int,
 ) (plumbing.Hash, error) {
@@ -440,16 +448,8 @@ func updateHead(repo *gogit.Repository, commitHash plumbing.Hash) error {
 }
 
 // buildSyntheticCommits resolves the project repository from the component's
-// config file, walks the lock file's git history for fingerprint changes, and
-// returns the matching [FingerprintChange] entries sorted chronologically.
-// Returns (nil, "", nil) when there are no changes to represent — either the
-// lock file is missing, has no fingerprint changes (with a warning), or the
-// current fingerprint matches the committed one.
-//
-// When currentFingerprint is non-empty it is compared against the fingerprint
-// stored in the HEAD commit's lock file. If they differ a "dirty" entry is
-// appended so that uncommitted config/overlay changes are represented in the
-// synthetic history.
+// config file, walks the lock file's git history, and returns matching
+// [LockChange] entries sorted chronologically.
 //
 // The lockDir is the absolute path to the lock file directory. It is converted
 // to a repo-relative path internally once the git repository root is known.
@@ -459,8 +459,7 @@ func buildSyntheticCommits(
 	config *projectconfig.ComponentConfig,
 	componentName string,
 	lockDir string,
-	currentFingerprint string,
-) ([]FingerprintChange, error) {
+) ([]LockChange, error) {
 	projectRepo, projectRepoDir, err := openProjectRepo(config, componentName)
 	if err != nil {
 		return nil, err
@@ -493,15 +492,15 @@ func buildSyntheticCommits(
 		return nil, nil
 	}
 
-	fpChanges, err := FindFingerprintChanges(ctx, cmdFactory, projectRepo, projectRepoDir, lockFileRelPath)
+	lockChanges, err := FindLockChanges(ctx, cmdFactory, projectRepo, projectRepoDir, lockFileRelPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find fingerprint changes for lock file %#q:\n%w",
+		return nil, fmt.Errorf("failed to find changes for lock file %#q:\n%w",
 			lockFileRelPath, err)
 	}
 
 	// In a shallow clone the commit that added the lock file may have been
 	// pruned. Detect this before falling through to dirty detection.
-	if len(fpChanges) == 0 {
+	if len(lockChanges) == 0 {
 		shallowCommits, _ := projectRepo.Storer.Shallow()
 		if len(shallowCommits) > 0 {
 			return nil, fmt.Errorf(
@@ -510,65 +509,14 @@ func buildSyntheticCommits(
 		}
 	}
 
-	// Check for uncommitted ("dirty") changes by comparing the caller-provided
-	// current fingerprint against the fingerprint stored in the HEAD lock file.
-	if dirty := BuildDirtyChange(currentFingerprint, headLock, config.EffectiveUpstreamCommit()); dirty != nil {
-		slog.Info("Current fingerprint differs from HEAD lock file; adding dirty entry",
-			"lockFile", lockFileRelPath)
-
-		fpChanges = append(fpChanges, *dirty)
-	}
-
-	if len(fpChanges) == 0 {
-		slog.Warn("Lock file has no fingerprint changes; skipping synthetic history",
+	if len(lockChanges) == 0 {
+		slog.Warn("Lock file has no changes; skipping synthetic history",
 			"lockFile", lockFileRelPath)
 
 		return nil, nil
 	}
 
-	return fpChanges, nil
-}
-
-// BuildDirtyChange returns a [FingerprintChange] representing uncommitted
-// config/overlay changes. Returns nil when currentFingerprint is empty or
-// matches the HEAD lock file's fingerprint.
-//
-// currentUpstreamCommit is the effective upstream commit from the on-disk
-// (possibly uncommitted) lock file. This is used instead of
-// [headLock.UpstreamCommit] so that upstream commit changes from
-// 'component update' (written to disk but not yet committed) are reflected
-// in the dirty entry.
-func BuildDirtyChange(
-	currentFingerprint string,
-	headLock *lockfile.ComponentLock,
-	currentUpstreamCommit string,
-) *FingerprintChange {
-	if currentFingerprint == "" {
-		return nil
-	}
-
-	if headLock == nil || headLock.InputFingerprint == "" {
-		return nil
-	}
-
-	if currentFingerprint == headLock.InputFingerprint {
-		return nil
-	}
-
-	slog.Debug("Dirty fingerprint detected",
-		"current", currentFingerprint,
-		"head", headLock.InputFingerprint)
-
-	return &FingerprintChange{
-		CommitMetadata: CommitMetadata{
-			Hash:        "dirty",
-			Author:      "azldev",
-			AuthorEmail: "azldev@local",
-			Timestamp:   time.Now().Unix(),
-			Message:     "Local changes (uncommitted)",
-		},
-		UpstreamCommit: currentUpstreamCommit,
-	}
+	return lockChanges, nil
 }
 
 // openProjectRepo opens the git repository that contains the component's

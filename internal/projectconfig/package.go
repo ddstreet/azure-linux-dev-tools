@@ -47,7 +47,7 @@ func (p PackagePublishConfig) EffectiveRPMChannel() string {
 // Currently only publish settings are supported; additional fields may be added in the future.
 type PackageConfig struct {
 	// Publish holds the publish settings for this package.
-	Publish PackagePublishConfig `toml:"publish,omitempty" json:"publish,omitempty" jsonschema:"title=Publish settings,description=Publishing settings for this binary package" fingerprint:"-"`
+	Publish PackagePublishConfig `toml:"publish,omitempty" json:"publish,omitempty" jsonschema:"title=Publish settings,description=Publishing settings for this binary package"`
 }
 
 // MergeUpdatesFrom updates the package config with non-zero values from other.
