@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	componentcmds "github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/component"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/testutils"
@@ -27,6 +26,7 @@ func TestNewUpdateCmd(t *testing.T) {
 	require.NotNil(t, cmd)
 	assert.Equal(t, "update", cmd.Use)
 	assert.NotNil(t, cmd.RunE)
+	assert.Nil(t, cmd.Flags().Lookup("bump"))
 }
 
 func TestNewUpdateCmd_Flags(t *testing.T) {
@@ -386,26 +386,6 @@ func TestUpdateComponents_AdvancesStaleLock(t *testing.T) {
 	require.NoError(t, loadErr)
 	assert.Equal(t, advancedCommit, updatedLock.UpstreamCommit,
 		"lock file on disk must contain the new commit")
-}
-
-// TestUpdateComponents_CheckOnlyAndBumpRejected verifies that callers (CLI or
-// programmatic) cannot combine --bump and --check-only. Cobra rejects this at
-// flag-parse time on the CLI, but UpdateComponents must also enforce it for
-// in-process callers; otherwise --bump would silently override --check-only's
-// no-write contract since the bump branch runs first.
-func TestUpdateComponents_CheckOnlyAndBumpRejected(t *testing.T) {
-	env := testutils.NewTestEnv(t)
-	addUpstreamComponent(env, "curl")
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
-
-	_, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-		Bump:            true,
-		CheckOnly:       true,
-	})
-	require.Error(t, err)
-	require.ErrorIs(t, err, azldev.ErrInvalidUsage,
-		"combining --bump and --check-only must surface as ErrInvalidUsage")
 }
 
 // TestUpdateComponents_CheckOnly_StaleReturnsError verifies that --check-only

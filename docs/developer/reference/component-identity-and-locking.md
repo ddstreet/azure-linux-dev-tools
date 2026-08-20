@@ -14,7 +14,6 @@ A component's fingerprint is a SHA256 combining:
 2. **Source identity** — content hash for local specs (all files in the spec directory), commit hash for upstream.
 3. **Overlay file hashes** — SHA256 of each file referenced by overlay `Source` fields.
 4. **Distro name + version**
-5. **Manual release bump counter** — increments with each manual release bump, ensuring a new fingerprint even if there are no config or source changes.
 
 Global change propagation works automatically: the fingerprint operates on the fully-merged config, so a change to a distro or group default changes the resolved config of every inheriting component.
 

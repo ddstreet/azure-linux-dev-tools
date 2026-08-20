@@ -341,10 +341,8 @@ type ComponentLockData struct {
 	UpstreamCommit string `json:"upstreamCommit,omitempty"`
 	// ImportCommit is the upstream commit at fork time (write-once).
 	ImportCommit string `json:"importCommit,omitempty"`
-	// ManualBump is the extra rebuild counter.
-	ManualBump int `json:"manualBump,omitempty"`
 	// InputFingerprint is the stored fingerprint from the last update.
-	// Covers build inputs (config, overlays, commit, manual bump, release ver)
+	// Covers build inputs (config, overlays, commit, release ver)
 	// but excludes resolution inputs like snapshot timestamp.
 	InputFingerprint string `json:"inputFingerprint,omitempty"`
 	// ResolutionInputHash is the stored hash of resolution inputs (snapshot,

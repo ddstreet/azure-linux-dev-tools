@@ -170,13 +170,12 @@ func TestRemoveSubmoduleEntries_PreservesNormalEntriesWithMixedModes(t *testing.
 func TestComputeCurrentFingerprint(t *testing.T) {
 	memFS := afero.NewMemMapFs()
 
-	lockedConfig := func(commit string, manualBump int) *projectconfig.ComponentConfig {
+	lockedConfig := func(commit string) *projectconfig.ComponentConfig {
 		return &projectconfig.ComponentConfig{
 			Name: "test",
 			Spec: projectconfig.SpecSource{SourceType: projectconfig.SpecSourceTypeUpstream},
 			Locked: &projectconfig.ComponentLockData{
 				UpstreamCommit: commit,
-				ManualBump:     manualBump,
 			},
 		}
 	}
@@ -207,7 +206,7 @@ func TestComputeCurrentFingerprint(t *testing.T) {
 		},
 		{
 			name:   "locked upstream commit produces fingerprint",
-			config: lockedConfig("abc123def456", 0),
+			config: lockedConfig("abc123def456"),
 		},
 		{
 			name: "spec upstream commit fallback produces fingerprint",
@@ -218,10 +217,6 @@ func TestComputeCurrentFingerprint(t *testing.T) {
 					UpstreamCommit: "abc123def456",
 				},
 			},
-		},
-		{
-			name:   "locked manual bump produces fingerprint",
-			config: lockedConfig("abc123def456", 5),
 		},
 		{
 			name: "source file without hash returns error",
@@ -260,28 +255,24 @@ func TestComputeCurrentFingerprint(t *testing.T) {
 	}
 
 	// Determinism: same inputs → same fingerprint.
-	fp1, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456", 0), "3.0")
+	fp1, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456"), "3.0")
 	require.NoError(t, err)
 
-	fp2, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456", 0), "3.0")
+	fp2, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456"), "3.0")
 	require.NoError(t, err)
 
 	require.NotEmpty(t, fp1)
 	assert.Equal(t, fp1, fp2, "identical inputs should produce identical fingerprint")
 
 	// Sensitivity: changing any input changes the fingerprint.
-	fpDiffRelease, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456", 0), "4.0")
+	fpDiffRelease, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456"), "4.0")
 	require.NoError(t, err)
 
-	fpDiffCommit, err := computeCurrentFingerprint(memFS, lockedConfig("999888777666", 0), "3.0")
-	require.NoError(t, err)
-
-	fpDiffBump, err := computeCurrentFingerprint(memFS, lockedConfig("abc123def456", 1), "3.0")
+	fpDiffCommit, err := computeCurrentFingerprint(memFS, lockedConfig("999888777666"), "3.0")
 	require.NoError(t, err)
 
 	assert.NotEqual(t, fp1, fpDiffRelease, "different releaseVer should change fingerprint")
 	assert.NotEqual(t, fp1, fpDiffCommit, "different upstream commit should change fingerprint")
-	assert.NotEqual(t, fp1, fpDiffBump, "different manual bump should change fingerprint")
 }
 
 func TestRehashModifiedEntriesValidatesOverlayHash(t *testing.T) {

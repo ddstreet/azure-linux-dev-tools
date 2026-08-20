@@ -612,7 +612,6 @@ func (r *Resolver) populateFromLock(config *projectconfig.ComponentConfig) {
 	config.Locked = &projectconfig.ComponentLockData{
 		UpstreamCommit:      lock.UpstreamCommit,
 		ImportCommit:        lock.ImportCommit,
-		ManualBump:          lock.ManualBump,
 		InputFingerprint:    lock.InputFingerprint,
 		ResolutionInputHash: lock.ResolutionInputHash,
 	}
@@ -734,7 +733,6 @@ func (r *Resolver) checkFingerprintFreshness(config *projectconfig.ComponentConf
 		*config,
 		releaseVer,
 		fingerprint.IdentityOptions{
-			ManualBump:     config.Locked.ManualBump,
 			SourceIdentity: config.Locked.UpstreamCommit,
 		},
 	)

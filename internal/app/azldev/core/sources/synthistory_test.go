@@ -233,7 +233,7 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 
 func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.T) {
 	// Simulates a realistic autorelease/autochangelog lifecycle:
-	//   upstream₁ → us₁(overlay) → us₂(manual-bump) → upstream₂ → us₃(overlay)
+	//   upstream₁ → us₁(overlay) → us₂(config) → upstream₂ → us₃(overlay)
 	// Three fingerprint changes across two upstream commits, exercising
 	// multiple interleaved changes on the same older upstream before a rebase.
 	memFS := memfs.New()

@@ -37,7 +37,6 @@ func TestNew(t *testing.T) {
 	assert.Equal(t, 1, lock.Version)
 	assert.Empty(t, lock.UpstreamCommit)
 	assert.Empty(t, lock.ImportCommit)
-	assert.Zero(t, lock.ManualBump)
 	assert.Empty(t, lock.InputFingerprint)
 }
 
@@ -111,7 +110,6 @@ func TestSaveAndLoad(t *testing.T) {
 	original := lockfile.New()
 	original.UpstreamCommit = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 	original.ImportCommit = "0000111122223333444455556666777788889999"
-	original.ManualBump = 2
 	original.InputFingerprint = "sha256:abcdef1234567890"
 
 	require.NoError(t, original.Save(memFS, lockPath))
@@ -122,7 +120,6 @@ func TestSaveAndLoad(t *testing.T) {
 	assert.Equal(t, 1, loaded.Version)
 	assert.Equal(t, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", loaded.UpstreamCommit)
 	assert.Equal(t, "0000111122223333444455556666777788889999", loaded.ImportCommit)
-	assert.Equal(t, 2, loaded.ManualBump)
 	assert.Equal(t, "sha256:abcdef1234567890", loaded.InputFingerprint)
 }
 
@@ -333,7 +330,6 @@ func TestOmitEmptyFields(t *testing.T) {
 	content := string(data)
 	assert.NotContains(t, content, "import-commit", "empty import-commit should be omitted")
 	assert.NotContains(t, content, "upstream-commit", "empty upstream-commit should be omitted")
-	assert.NotContains(t, content, "manual-bump", "zero manual-bump should be omitted")
 	assert.NotContains(t, content, "resolution-input-hash", "empty resolution-input-hash should be omitted")
 	assert.Contains(t, content, "input-fingerprint")
 }
@@ -358,16 +354,14 @@ func TestStoreGetOrNew_ExistingComponent(t *testing.T) {
 	original := lockfile.New()
 	original.UpstreamCommit = testCommitHash
 	original.ImportCommit = "import-hash"
-	original.ManualBump = 3
 
 	require.NoError(t, store.Save("curl", original))
 
-	// GetOrNew should return the existing lock, preserving all fields.
+	// GetOrNew should return the existing lock, preserving its fields.
 	lock, err := store.GetOrNew("curl")
 	require.NoError(t, err)
 	assert.Equal(t, testCommitHash, lock.UpstreamCommit)
 	assert.Equal(t, "import-hash", lock.ImportCommit)
-	assert.Equal(t, 3, lock.ManualBump)
 }
 
 func TestStoreGetOrNew_CorruptLock_ReturnsError(t *testing.T) {
