@@ -124,7 +124,7 @@ func (s *Store) Get(componentName string) (*ComponentLock, error) {
 
 // GetOrNew returns the lock for a component, creating a new empty lock if
 // the lock file does not exist on disk. Returns an error if the lock file
-// exists but cannot be loaded (e.g., corrupt TOML, unsupported version).
+// exists but cannot be loaded (e.g., corrupt TOML).
 func (s *Store) GetOrNew(componentName string) (*ComponentLock, error) {
 	lock, err := s.Get(componentName)
 	if err != nil {

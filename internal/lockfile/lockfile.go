@@ -24,14 +24,8 @@ import (
 // lockFileExtension is the file extension for lock files.
 const lockFileExtension = ".lock"
 
-// currentVersion is the lock file format version.
-const currentVersion = 1
-
 // ComponentLock holds the locked state for a single component.
 type ComponentLock struct {
-	// Version is the lock file format version.
-	Version int `toml:"version" comment:"Managed by azldev component update. Do not edit manually."`
-
 	// ImportCommit is the upstream commit hash at the time of initial import
 	// (fork point). Upstream changelog up to this commit is inherited verbatim.
 	// Write-once: set on first import, never changed afterwards.
@@ -60,11 +54,9 @@ type ComponentLock struct {
 	ResolutionInputHash string `toml:"resolution-input-hash,omitempty"`
 }
 
-// New creates a new empty component lock with the current format version.
+// New creates a new empty component lock.
 func New() *ComponentLock {
-	return &ComponentLock{
-		Version: currentVersion,
-	}
+	return &ComponentLock{}
 }
 
 // LockPath returns the path to a component's lock file given the lock
@@ -78,8 +70,7 @@ func LockPath(lockDir, componentName string) (string, error) {
 }
 
 // Load reads and parses a per-component lock file from the given path.
-// Returns an error if the file cannot be read or parsed, or if the format
-// version is unsupported.
+// Returns an error if the file cannot be read or parsed.
 func Load(fs opctx.FS, path string) (*ComponentLock, error) {
 	data, err := fileutils.ReadFile(fs, path)
 	if err != nil {
@@ -94,19 +85,17 @@ func Load(fs opctx.FS, path string) (*ComponentLock, error) {
 	return lock, nil
 }
 
-// Parse unmarshals a [ComponentLock] from raw TOML bytes and validates the
-// format version. Use this when the lock file content has already been read
-// (e.g. from git show); use [Load] to read from the filesystem.
+// Parse unmarshals a [ComponentLock] from raw TOML bytes. Use this when the
+// lock file content has already been read (e.g. from git show); use [Load] to
+// read from the filesystem.
 func Parse(data []byte) (*ComponentLock, error) {
+	// Lock compatibility is intentionally structural rather than version-gated.
+	// A file is usable when its TOML can be decoded into the fields understood by
+	// this binary; removing the synthetic version integer avoids rejecting an
+	// otherwise compatible lock solely because metadata changed.
 	var lock ComponentLock
 	if err := toml.Unmarshal(data, &lock); err != nil {
 		return nil, fmt.Errorf("parsing lock file:\n%w", err)
-	}
-
-	if lock.Version != currentVersion {
-		return nil, fmt.Errorf(
-			"unsupported lock file version %d (expected %d)",
-			lock.Version, currentVersion)
 	}
 
 	return &lock, nil
