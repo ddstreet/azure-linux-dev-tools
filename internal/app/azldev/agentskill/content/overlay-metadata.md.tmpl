@@ -10,9 +10,8 @@ of change* it is (`metadata`). When a `[metadata]` block is present it **require
 a `category` and an `upstream-status`. This skill covers how to pick the right values,
 attach provenance, and write the TOML at the moment you author or review an overlay.
 
-Metadata is **pure documentation** — it never changes the rendered spec and is excluded
-from component fingerprints, so adding or editing it never invalidates build caches or
-locks. For overlay *types* and the render-and-inspect loop, read the `azldev-overlays`
+Metadata is **pure documentation** and never changes the rendered spec. For
+overlay *types* and the render-and-inspect loop, read the `azldev-overlays`
 skill; this skill is only about the `metadata` table.
 
 ## One `[metadata]` block = one logical change

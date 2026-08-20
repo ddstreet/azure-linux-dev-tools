@@ -6,11 +6,10 @@ Resolve and lock source identities for components
 
 ### Synopsis
 
-Resolve source identities for components and write them to per-component lock files.
+Resolve upstream commits for components and write them to per-component lock files.
 
 For upstream components, this resolves the effective commit hash using the
 distro snapshot time or explicit pin, then records it in locks/<name>.lock.
-For local components, this computes a content hash of the spec directory.
 Subsequent commands (render, build) use the locked state for deterministic,
 reproducible results.
 
@@ -47,7 +46,7 @@ azldev component update [flags]
 
 ```
   -a, --all-components                Include all components
-      --check-only                    resolve identities and recompute fingerprints but do not write lock files or prune orphans. Exits 0 when nothing would change and 1 when any component is stale (or, with --all-components, when any orphan lock would be pruned). Intended for CI gates
+      --check-only                    resolve upstream commits but do not write lock files or prune orphans. Exits 0 when nothing would change and 1 when any component is stale (or, with --all-components, when any orphan lock would be pruned). Intended for CI gates
   -p, --component stringArray         Component name pattern
   -g, --component-group stringArray   Component group name
   -h, --help                          help for update

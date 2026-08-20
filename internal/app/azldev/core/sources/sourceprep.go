@@ -18,7 +18,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
-	"github.com/microsoft/azure-linux-dev-tools/internal/fingerprint"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
@@ -65,36 +64,16 @@ type PreparerOption func(*sourcePreparerImpl)
 // requires the project configuration to reside inside a git repository.
 // Without this option, no dist-git is created and synthetic history is skipped.
 //
-// The cmdFactory is used to shell out to git for fingerprint change detection.
+// The cmdFactory is used to shell out to git for lock history detection.
 // The lockReader provides access to per-component lock files and their directory.
-// The releaseVer must be the per-component resolved distro release version
-// (e.g., "4.0"), not the project default — components may override the distro
-// via [projectconfig.SpecSource.UpstreamDistro].
 func WithGitRepo(
 	cmdFactory opctx.CmdFactory,
 	lockReader lockfile.LockReader,
-	releaseVer string,
 ) PreparerOption {
 	return func(p *sourcePreparerImpl) {
 		p.withGitRepo = true
 		p.cmdFactory = cmdFactory
 		p.lockReader = lockReader
-		p.releaseVer = releaseVer
-	}
-}
-
-// WithDirtyDetection returns a [PreparerOption] that enables uncommitted-change
-// detection during synthetic history generation. When set, the current input
-// fingerprint is compared against the committed lock file; if they differ, a
-// "dirty" synthetic commit is appended to represent the uncommitted changes.
-// Without this option, only committed fingerprint changes produce synthetic commits.
-//
-// This should be enabled for commands that operate on the working tree state
-// (build, render, prepare-sources) and left disabled for commands that should
-// only reflect committed state.
-func WithDirtyDetection() PreparerOption {
-	return func(p *sourcePreparerImpl) {
-		p.dirtyDetection = true
 	}
 }
 
@@ -168,7 +147,7 @@ type sourcePreparerImpl struct {
 	// source preparation. Git-tracked files are still fetched.
 	skipLookaside bool
 
-	// cmdFactory is used to shell out to git for fingerprint change detection
+	// cmdFactory is used to shell out to git for lock history detection
 	// in the project repository. Set via [WithGitRepo].
 	cmdFactory opctx.CmdFactory
 
@@ -179,14 +158,6 @@ type sourcePreparerImpl struct {
 	// allowNoHashes, when true, allows source file references without hash
 	// values. Missing hashes are computed from the downloaded files.
 	allowNoHashes bool
-
-	// dirtyDetection, when true, enables uncommitted-change detection during
-	// synthetic history generation. Set via [WithDirtyDetection].
-	dirtyDetection bool
-
-	// releaseVer is the per-component resolved distro release version, not the
-	// project default. Set via [WithGitRepo].
-	releaseVer string
 
 	// upstreamDistTag is the resolved %{?dist} expansion (e.g. ".fc43") used to
 	// expand a Fedora upstream component's pristine Release tag when emitting
@@ -239,11 +210,6 @@ func NewPreparer(
 		}
 	}
 
-	if impl.dirtyDetection && !impl.withGitRepo {
-		return nil, errors.New("WithDirtyDetection requires WithGitRepo; " +
-			"dirty detection compares fingerprints against committed lock files in the git history")
-	}
-
 	return impl, nil
 }
 
@@ -284,16 +250,13 @@ func (p *sourcePreparerImpl) PrepareSources(
 		}
 	}
 
-	fingerprintConfig := component.GetConfig()
-
 	if applyOverlays {
 		repackedArchives, err := p.applyOverlaysToSources(ctx, component, outputDir)
 		if err != nil {
 			return err
 		}
 
-		fingerprintConfig, err = p.updateSourcesFile(component, outputDir, repackedArchives)
-		if err != nil {
+		if err := p.updateSourcesFile(component, outputDir, repackedArchives); err != nil {
 			return fmt.Errorf("failed to update 'sources' file for component %#q:\n%w",
 				component.GetName(), err)
 		}
@@ -305,7 +268,7 @@ func (p *sourcePreparerImpl) PrepareSources(
 
 	// Record the changes as synthetic git history when dist-git creation is enabled.
 	if p.withGitRepo {
-		if err := p.trySyntheticHistory(ctx, component, fingerprintConfig, outputDir); err != nil {
+		if err := p.trySyntheticHistory(ctx, component, outputDir); err != nil {
 			return fmt.Errorf("failed to generate synthetic history for component %#q:\n%w",
 				component.GetName(), err)
 		}
@@ -486,7 +449,7 @@ func initSourcesRepo(sourcesDirPath string) (*gogit.Repository, error) {
 
 // trySyntheticHistory attempts to create synthetic git commits on top of the
 // component's sources directory. Synthetic commits are derived from lock file
-// fingerprint changes in the project repository and interleaved into the
+// changes in the project repository and interleaved into the
 // upstream dist-git history. If no .git directory exists, one is initialized
 // with an initial commit so synthetic commits can be layered on uniformly.
 //
@@ -494,29 +457,13 @@ func initSourcesRepo(sourcesDirPath string) (*gogit.Repository, error) {
 func (p *sourcePreparerImpl) trySyntheticHistory(
 	ctx context.Context,
 	component components.Component,
-	fingerprintConfig *projectconfig.ComponentConfig,
 	sourcesDirPath string,
 ) error {
 	config := component.GetConfig()
 	componentName := component.GetName()
 
-	// Compute the current fingerprint for uncommitted-change detection.
-	// Only computed when dirty detection is enabled (e.g., build, render).
-	// An empty fingerprint skips dirty detection in buildSyntheticCommits.
-	var currentFingerprint string
-
-	if p.dirtyDetection {
-		var fpErr error
-
-		currentFingerprint, fpErr = computeCurrentFingerprint(p.fs, fingerprintConfig, p.releaseVer)
-		if fpErr != nil {
-			return fmt.Errorf("dirty detection failed for component %#q:\n%w", componentName, fpErr)
-		}
-	}
-
 	changes, err := buildSyntheticCommits(
 		ctx, p.cmdFactory, config, componentName, p.lockReader.LockDir(),
-		currentFingerprint,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to build synthetic commits:\n%w", err)
@@ -568,40 +515,6 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 	}
 
 	return nil
-}
-
-// computeCurrentFingerprint computes the current input fingerprint for a
-// component from its resolved config. Returns ("", nil) for local components
-// or when the source identity cannot be determined — dirty detection is
-// silently skipped for these. Returns a non-nil error when the fingerprint
-// computation itself fails.
-func computeCurrentFingerprint(
-	fs opctx.FS,
-	config *projectconfig.ComponentConfig,
-	releaseVer string,
-) (string, error) {
-	if config == nil {
-		return "", nil
-	}
-
-	sourceIdentity := config.EffectiveUpstreamCommit()
-	if sourceIdentity == "" {
-		return "", nil
-	}
-
-	identity, err := fingerprint.ComputeIdentity(
-		fs,
-		*config,
-		releaseVer,
-		fingerprint.IdentityOptions{
-			SourceIdentity: sourceIdentity,
-		},
-	)
-	if err != nil {
-		return "", fmt.Errorf("computing current fingerprint for %#q:\n%w", config.Name, err)
-	}
-
-	return identity.Fingerprint, nil
 }
 
 // removeSubmoduleEntries strips gitlink (mode 160000) entries from the repository
@@ -725,7 +638,7 @@ func (p *sourcePreparerImpl) DiffSources(
 // that isn't there, which almost certainly indicates a stale config or filename typo.
 func (p *sourcePreparerImpl) updateSourcesFile(
 	component components.Component, outputDir string, modifiedArchives []string,
-) (*projectconfig.ComponentConfig, error) {
+) error {
 	config := component.GetConfig()
 	sourceFiles := slices.Clone(config.SourceFiles)
 
@@ -734,31 +647,31 @@ func (p *sourcePreparerImpl) updateSourcesFile(
 	// when no archive overlays ran, in dry-run mode, or when source downloads were
 	// skipped, so rehashing is correctly avoided in those cases.
 	if len(sourceFiles) == 0 && len(modifiedArchives) == 0 {
-		return config, nil
+		return nil
 	}
 
 	sourcesFilePath := filepath.Join(outputDir, fedorasource.SourcesFileName)
 
 	existingContent, err := p.readSourcesFileIfExists(sourcesFilePath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Parse once, then rehash modified archives and merge source-files entries
 	// on the parsed representation — single parse, single write.
 	existingLines, err := fedorasource.ReadSourcesFile(existingContent)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse 'sources' file %#q:\n%w", sourcesFilePath, err)
+		return fmt.Errorf("failed to parse 'sources' file %#q:\n%w", sourcesFilePath, err)
 	}
 
 	// Rehash and validate archives modified by archive overlays.
 	if err := p.rehashModifiedEntries(existingLines, sourceFiles, outputDir, modifiedArchives); err != nil {
-		return nil, err
+		return err
 	}
 
 	mergedLines, err := p.buildSourceEntries(sourceFiles, existingLines, component.GetName(), outputDir)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	newContent := strings.Join(mergedLines, "\n") + "\n"
@@ -769,13 +682,10 @@ func (p *sourcePreparerImpl) updateSourcesFile(
 		[]byte(newContent),
 		fileperms.PublicFile,
 	); err != nil {
-		return nil, fmt.Errorf("failed to write 'sources' file %#q:\n%w", sourcesFilePath, err)
+		return fmt.Errorf("failed to write 'sources' file %#q:\n%w", sourcesFilePath, err)
 	}
 
-	effectiveConfig := *config
-	effectiveConfig.SourceFiles = sourceFiles
-
-	return &effectiveConfig, nil
+	return nil
 }
 
 // rehashModifiedEntries updates the Raw and Entry fields of parsed 'sources' lines

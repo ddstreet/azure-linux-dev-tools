@@ -20,7 +20,7 @@ type DistroReference struct {
 	// Snapshot date/time for source code if specified components will use source as it existed at this time.
 	// Note: set this on the distro or group default-component-config, not on individual components.
 	// Per-component snapshots are rejected when lock validation is enabled.
-	Snapshot string `toml:"snapshot,omitempty" json:"snapshot,omitempty" jsonschema:"format=date-time,title=Snapshot,description=Snapshot timestamp for source code. Set on the distro or group default-component-config only — per-component snapshots are not allowed." fingerprint:"-"`
+	Snapshot string `toml:"snapshot,omitempty" json:"snapshot,omitempty" jsonschema:"format=date-time,title=Snapshot,description=Snapshot timestamp for source code. Set on the distro or group default-component-config only — per-component snapshots are not allowed."`
 }
 
 // Implements the [Stringer] interface for [DistroReference].

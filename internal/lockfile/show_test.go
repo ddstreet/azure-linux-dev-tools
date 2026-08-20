@@ -19,7 +19,6 @@ import (
 )
 
 const validLockTOML = `upstream-commit = "bbb222"
-input-fingerprint = "fff000"
 `
 
 // commitFile creates or overwrites a file in the in-memory repo and commits it.
@@ -66,7 +65,6 @@ func TestShowAtCommit(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "bbb222", lock.UpstreamCommit)
-		assert.Equal(t, "fff000", lock.InputFingerprint)
 	})
 
 	t.Run("reads correct state at each commit", func(t *testing.T) {
@@ -144,15 +142,15 @@ func TestReadAllAtCommit(t *testing.T) {
 		commitFile(t, repo, testFS, "locks/curl.lock", validLockTOML, "add curl lock")
 		commitHash := commitFile(t, repo, testFS,
 			"locks/bash.lock",
-			"upstream-commit = \"bash222\"\ninput-fingerprint = \"bashfp\"\n",
+			"upstream-commit = \"bash222\"\n",
 			"add bash lock",
 		)
 
 		locks, readErr := lockfile.ReadAllAtCommit(repo, commitHash, lockDir)
 		require.NoError(t, readErr)
 		assert.Len(t, locks, 2)
-		assert.Equal(t, "fff000", locks["curl"].InputFingerprint)
-		assert.Equal(t, "bashfp", locks["bash"].InputFingerprint)
+		assert.Equal(t, "bbb222", locks["curl"].UpstreamCommit)
+		assert.Equal(t, "bash222", locks["bash"].UpstreamCommit)
 	})
 
 	t.Run("empty when no lock dir", func(t *testing.T) {
@@ -217,7 +215,7 @@ func TestReadAllAtCommit(t *testing.T) {
 		locks, readErr := lockfile.ReadAllAtCommit(repo, commitHash, ".")
 		require.NoError(t, readErr)
 		assert.Len(t, locks, 1)
-		assert.Equal(t, "fff000", locks["curl"].InputFingerprint)
+		assert.Equal(t, "bbb222", locks["curl"].UpstreamCommit)
 	})
 
 	t.Run("normalizes ./locks to locks", func(t *testing.T) {

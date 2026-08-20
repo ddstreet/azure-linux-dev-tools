@@ -115,8 +115,8 @@ func TestUpdateComponentSkillStagesRenderedOutputBeforeAmend(t *testing.T) {
 	doc, err := agentskill.SkillDocument("azldev-update-component", testParams())
 	require.NoError(t, err)
 
-	assert.Equal(t, 2, strings.Count(doc, "git add specs/<first-char>/<name>/"),
-		"both amend workflows must stage the post-commit render")
+	assert.Equal(t, 1, strings.Count(doc, "git add specs/<first-char>/<name>/"),
+		"the source-resolution workflow must stage the post-commit render")
 }
 
 func TestSkillFrontmatterInvariants(t *testing.T) {

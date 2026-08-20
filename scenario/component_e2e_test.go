@@ -54,7 +54,7 @@ const (
 // azldev regression and an upstream-branch drift easy to spot in CI logs.
 //
 // fullHistory controls clone depth. 'azldev component render' walks the
-// project repo's git log to count lock-file fingerprint changes (used to
+// project repo's git log to count lock-file changes (used to
 // determine the synthetic-commit count and the Release-tag bump); a shallow
 // (--depth=1) clone hides that history and produces a smaller bump than the
 // upstream rendered output recorded, so render idempotency tests must clone

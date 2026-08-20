@@ -56,9 +56,9 @@ func NewHistoryCmd() *cobra.Command {
 		Short:   "Report per-component change activity and customization detail",
 		Long: `Report three independent change-activity signals per component:
 
-  - toml-commits:         commits to the component's source TOML file
-  - customizations:       count of explicit customization items in the config
-  - fingerprint-changes:  commits where the lock file's input-fingerprint changed
+  - toml-commits:    commits to the component's source TOML file
+  - customizations:  count of explicit customization items in the config
+  - lock-changes:    commits that changed the component's lock file
 
 Use this to find which packages get the most attention (for documentation,
 review prioritization, or refactoring planning).
@@ -202,27 +202,26 @@ type HistoryResult struct {
 	// invocations.
 	CustomizationItems []CustomizationItem `json:"customizationItems,omitempty" table:"-"`
 
-	// FingerprintChanges is the number of commits where the lock file's
-	// input-fingerprint actually changed.
-	FingerprintChanges int `json:"fingerprintChanges"`
+	// LockChanges is the number of commits that changed the lock file.
+	LockChanges int `json:"lockChanges"`
 
-	// FingerprintChangeDetails is the per-commit metadata for each
-	// fingerprint change counted in [FingerprintChanges] (oldest first).
+	// LockChangeDetails is the per-commit metadata for each lock change
+	// counted in [LockChanges] (oldest first).
 	// Hidden from the human-readable table -- use JSON output to consume
 	// them (e.g., to hand-author changelog entries).
 	//
-	// Each entry is populated from [sources.FingerprintChange] via an
+	// Each entry is populated from [sources.LockChange] via an
 	// explicit field-by-field copy in [populateLockMetrics]. The
 	// gathering algorithm is shared with the synthetic dist-git history
 	// flow; the wire-level type is local so that:
 	//   - the JSON contract for this command lives in this file, and
-	//   - removing a field from [sources.FingerprintChange] /
+	//   - removing a field from [sources.LockChange] /
 	//     [sources.CommitMetadata] surfaces as a compile error at the
 	//     copy site rather than silently dropping changelog metadata.
 	// The compile-error guard is one-directional (it catches REMOVED
 	// upstream fields); a NEWLY ADDED upstream field is caught instead by
-	// TestFingerprintChangeDTOMirrorsSource.
-	FingerprintChangeDetails []FingerprintChange `json:"fingerprintChangeDetails,omitempty" table:"-"`
+	// TestLockChangeDTOMirrorsSource.
+	LockChangeDetails []LockChange `json:"lockChangeDetails,omitempty" table:"-"`
 
 	// HasLock is true when a lock file currently exists for this component.
 	HasLock bool `json:"hasLock,omitempty" table:"-"`
@@ -234,19 +233,19 @@ type HistoryResult struct {
 	Warnings []string `json:"warnings,omitempty" table:"-"`
 }
 
-// FingerprintChange is the wire-level representation of one lock-file
-// fingerprint change for the [HistoryResult.FingerprintChangeDetails]
-// field. It mirrors the fields of [sources.FingerprintChange] (and its
+// LockChange is the wire-level representation of one lock-file change for the
+// [HistoryResult.LockChangeDetails] field. It mirrors the fields of
+// [sources.LockChange] (and its
 // embedded [sources.CommitMetadata]) that consumers of `azldev component
 // history` JSON output care about.
 //
 // The fields are copied explicitly in [populateLockMetrics] rather than
-// embedding [sources.FingerprintChange] directly so that:
+// embedding [sources.LockChange] directly so that:
 //   - the JSON contract for this command is owned by this package, and
 //   - dropping a field from the synthetic-history source type produces a
 //     compile error at the copy site instead of silently emptying the
 //     downstream changelog data.
-type FingerprintChange struct {
+type LockChange struct {
 	Hash           string `json:"hash"`
 	Author         string `json:"author"`
 	AuthorEmail    string `json:"authorEmail"`
@@ -360,8 +359,8 @@ func ComponentHistory(env *azldev.Env, options *HistoryOptions) ([]HistoryResult
 		results = append(results, parmapRes.Value)
 	}
 
-	// FingerprintChangeDetails is potentially the largest field in the
-	// payload (one entry per fingerprint change per component, each with
+	// LockChangeDetails is potentially the largest field in the payload
+	// (one entry per lock change per component, each with
 	// commit metadata); JSON consumers on -a runs at azurelinux scale would
 	// otherwise get multi-MB responses. The details exist for drilling into
 	// a single component to author a changelog, so keep them only when
@@ -370,7 +369,7 @@ func ComponentHistory(env *azldev.Env, options *HistoryOptions) ([]HistoryResult
 	// details (the same len()==1 predicate the card view keys off).
 	if len(results) != 1 {
 		for i := range results {
-			results[i].FingerprintChangeDetails = nil
+			results[i].LockChangeDetails = nil
 		}
 	}
 

@@ -13,7 +13,7 @@ type CheckConfig struct {
 	// Skip indicates whether the %check section should be disabled for this component.
 	Skip bool `toml:"skip,omitempty" json:"skip,omitempty" jsonschema:"title=Skip check,description=Disables the %check section by prepending 'exit 0' when set to true"`
 	// SkipReason provides a required justification when Skip is true.
-	SkipReason string `toml:"skip_reason,omitempty" json:"skipReason,omitempty" jsonschema:"title=Skip reason,description=Required justification for skipping the %check section" fingerprint:"-"`
+	SkipReason string `toml:"skip_reason,omitempty" json:"skipReason,omitempty" jsonschema:"title=Skip reason,description=Required justification for skipping the %check section"`
 }
 
 // Validate checks that required fields are set when Skip is true.
@@ -31,11 +31,6 @@ func (c *CheckConfig) Validate() error {
 
 // Encapsulates configuration for building a component. Configuration for how to acquire
 // or prepare the sources for a component are out of scope.
-//
-// HashInclude must be a value receiver because hashstructure's Includable interface is
-// invoked on the hashed value; Validate uses a pointer receiver by convention.
-//
-//nolint:recvcheck // value + pointer receivers are intentional (see doc comment above).
 type ComponentBuildConfig struct {
 	// Which features should be enabled via `with` options to the builder.
 	With []string `toml:"with,omitempty" json:"with,omitempty" jsonschema:"title=With options,description='with' options to pass to the builder."`
@@ -54,20 +49,9 @@ type ComponentBuildConfig struct {
 	// Check section configuration.
 	Check CheckConfig `toml:"check,omitempty" json:"check,omitempty" jsonschema:"title=Check configuration,description=Configuration for the %check section"`
 	// Failure configuration and policy for this component's build.
-	Failure ComponentBuildFailureConfig `toml:"failure,omitempty" json:"failure,omitempty" jsonschema:"title=Build failure configuration,description=Configuration and policy regarding build failures for this component." fingerprint:"-"`
+	Failure ComponentBuildFailureConfig `toml:"failure,omitempty" json:"failure,omitempty" jsonschema:"title=Build failure configuration,description=Configuration and policy regarding build failures for this component."`
 	// Hints for how or when to build the component; must not be required for correctness of builds.
-	Hints ComponentBuildHints `toml:"hints,omitempty" json:"hints,omitempty" jsonschema:"title=Build hints,description=Non-essential hints for how or when to build the component." fingerprint:"-"`
-}
-
-// HashInclude implements the hashstructure [Includable] interface so that
-// [ComponentBuildConfig.EmitUpstreamProvenance] is omitted from the component
-// fingerprint when false or not set.
-func (c ComponentBuildConfig) HashInclude(field string, _ any) (bool, error) {
-	if field == "EmitUpstreamProvenance" {
-		return c.EmitUpstreamProvenance, nil
-	}
-
-	return true, nil
+	Hints ComponentBuildHints `toml:"hints,omitempty" json:"hints,omitempty" jsonschema:"title=Build hints,description=Non-essential hints for how or when to build the component."`
 }
 
 // ComponentBuildFailureConfig encapsulates configuration and policy regarding a component's

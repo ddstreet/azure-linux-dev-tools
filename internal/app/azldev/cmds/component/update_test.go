@@ -13,7 +13,6 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/testutils"
 	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
-	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileperms"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -111,9 +110,8 @@ func addUpstreamComponent(env *testutils.TestEnv, name string) {
 	}
 }
 
-// TestUpdateComponents_WritesFingerprint exercises the full UpdateComponents pipeline
-// with mocked git, verifying that lock files are created with fingerprints.
-func TestUpdateComponents_WritesFingerprint(t *testing.T) {
+// TestUpdateComponents_WritesCommit exercises the full update pipeline.
+func TestUpdateComponents_WritesCommit(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "abc123def456"
@@ -132,19 +130,14 @@ func TestUpdateComponents_WritesFingerprint(t *testing.T) {
 	assert.True(t, results[0].Changed)
 	assert.Equal(t, commit, results[0].UpstreamCommit)
 
-	// Verify lock file was written with fingerprint.
 	store := lockfile.NewStore(env.TestFS, testLockDir)
 
 	lock, loadErr := store.Get("curl")
 	require.NoError(t, loadErr)
 	assert.Equal(t, commit, lock.UpstreamCommit)
-	assert.NotEmpty(t, lock.InputFingerprint, "lock should have a computed fingerprint")
-	assert.Contains(t, lock.InputFingerprint, "sha256:")
 }
 
-// TestUpdateComponents_FingerprintLifecycle exercises the full update → modify → re-update
-// flow through the public UpdateComponents API.
-func TestUpdateComponents_FingerprintLifecycle(t *testing.T) {
+func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeLock(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "abc123def456"
@@ -158,39 +151,23 @@ func TestUpdateComponents_FingerprintLifecycle(t *testing.T) {
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	}
 
-	// Phase 1: Initial update.
 	results, err := componentcmds.UpdateComponents(env.Env, options)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Changed)
 
-	store := lockfile.NewStore(env.TestFS, testLockDir)
-	fp1 := mustGetFingerprint(t, store, "curl")
-
-	// Phase 2: Re-run with same commit — idempotent.
-	results2, err := componentcmds.UpdateComponents(env.Env, options)
-	require.NoError(t, err)
-	assert.Empty(t, results2, "idempotent re-run should produce no display results")
-
-	// Recreate store to bypass read cache.
-	store = lockfile.NewStore(env.TestFS, testLockDir)
-	fp2 := mustGetFingerprint(t, store, "curl")
-	assert.Equal(t, fp1, fp2, "fingerprint should be stable on re-run")
-
-	// Phase 3: Modify config — fingerprint should change.
-	// Build.With survives inheritance (mergo preserves non-empty fields from
-	// later layers), so adding a build option changes the config hash.
 	modifiedConfig := env.Config.Components["curl"]
 	modifiedConfig.Build.With = []string{"ssl"}
 	env.Config.Components["curl"] = modifiedConfig
 
-	_, err = componentcmds.UpdateComponents(env.Env, options)
+	results, err = componentcmds.UpdateComponents(env.Env, options)
 	require.NoError(t, err)
+	assert.Empty(t, results)
 
-	// Recreate store to bypass read cache.
-	store = lockfile.NewStore(env.TestFS, testLockDir)
-	fp3 := mustGetFingerprint(t, store, "curl")
-	assert.NotEqual(t, fp1, fp3, "config change (Build.With) must produce a different fingerprint")
+	store := lockfile.NewStore(env.TestFS, testLockDir)
+	lock, err := store.Get("curl")
+	require.NoError(t, err)
+	assert.Equal(t, commit, lock.UpstreamCommit)
 }
 
 // TestUpdateComponents_MultipleComponents tests update with multiple components.
@@ -222,34 +199,25 @@ func TestUpdateComponents_MultipleComponents(t *testing.T) {
 	assert.Contains(t, changedNames, "curl")
 	assert.Contains(t, changedNames, "bash")
 
-	// Both should have lock files with fingerprints.
+	// Both should have lock files with resolved commits.
 	store := lockfile.NewStore(env.TestFS, testLockDir)
 
-	curlFP := mustGetFingerprint(t, store, "curl")
-	bashFP := mustGetFingerprint(t, store, "bash")
-
-	assert.NotEmpty(t, curlFP)
-	assert.NotEmpty(t, bashFP)
-	// Note: components with identical configs (same source type, no overlays, same commit)
-	// will produce the same fingerprint — Name is excluded from the hash by design.
-	// This is correct: the fingerprint captures build-affecting inputs only.
+	curlLock, err := store.Get("curl")
+	require.NoError(t, err)
+	bashLock, err := store.Get("bash")
+	require.NoError(t, err)
+	assert.Equal(t, commit, curlLock.UpstreamCommit)
+	assert.Equal(t, commit, bashLock.UpstreamCommit)
 }
 
-// TestUpdateComponents_LocalComponentWritesLock verifies that local components
-// get lock files with empty upstream-commit and populated fingerprint.
-func TestUpdateComponents_LocalComponentWritesLock(t *testing.T) {
+func TestUpdateComponents_LocalComponentDoesNotWriteLock(t *testing.T) {
 	env := testutils.NewTestEnv(t)
-
-	setupMockGit(env, "doesnt-matter")
-
-	specPath := "/project/specs/local-pkg/local-pkg.spec"
-	require.NoError(t, fileutils.WriteFile(env.TestFS, specPath, []byte("Name: local-pkg\n"), fileperms.PrivateFile))
 
 	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
 		Name: "local-pkg",
 		Spec: projectconfig.SpecSource{
 			SourceType: projectconfig.SpecSourceTypeLocal,
-			Path:       specPath,
+			Path:       "/project/specs/local-pkg/local-pkg.spec",
 		},
 	}
 
@@ -259,84 +227,12 @@ func TestUpdateComponents_LocalComponentWritesLock(t *testing.T) {
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	})
 	require.NoError(t, err)
-
-	// Local component should appear in results as changed (new lock).
-	foundChanged := false
-
-	for _, r := range results {
-		if r.Component == "local-pkg" {
-			assert.True(t, r.Changed, "new local component should be marked changed")
-			assert.Empty(t, r.UpstreamCommit, "local components have no upstream commit")
-
-			foundChanged = true
-		}
-	}
-
-	assert.True(t, foundChanged, "local-pkg should appear in results")
-
-	// Lock file should exist with empty upstream-commit and populated fingerprint.
-	store := lockfile.NewStore(env.TestFS, testLockDir)
-
-	lock, loadErr := store.Get("local-pkg")
-	require.NoError(t, loadErr)
-	assert.Empty(t, lock.UpstreamCommit, "local lock should have empty upstream-commit")
-	assert.NotEmpty(t, lock.InputFingerprint, "local lock should have a fingerprint")
-	assert.Contains(t, lock.InputFingerprint, "sha256:")
-}
-
-// TestUpdateComponents_LocalSpecChangeRefreshesFingerprint verifies that
-// modifying a local spec file causes update to produce a different fingerprint.
-func TestUpdateComponents_LocalSpecChangeRefreshesFingerprint(t *testing.T) {
-	env := testutils.NewTestEnv(t)
-
-	setupMockGit(env, "doesnt-matter")
-
-	specPath := "/project/specs/local-pkg/local-pkg.spec"
-	specContent := []byte("Name: local-pkg\nVersion: 1.0\n")
-	require.NoError(t, fileutils.WriteFile(env.TestFS, specPath, specContent, fileperms.PrivateFile))
-
-	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
-		Name: "local-pkg",
-		Spec: projectconfig.SpecSource{
-			SourceType: projectconfig.SpecSourceTypeLocal,
-			Path:       specPath,
-		},
-	}
-
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
-
-	options := &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-	}
-
-	// Phase 1: initial update.
-	_, err := componentcmds.UpdateComponents(env.Env, options)
-	require.NoError(t, err)
+	assert.Empty(t, results)
 
 	store := lockfile.NewStore(env.TestFS, testLockDir)
-	fp1 := mustGetFingerprint(t, store, "local-pkg")
-
-	// Phase 2: modify spec content.
-	specContentV2 := []byte("Name: local-pkg\nVersion: 2.0\n")
-	require.NoError(t, fileutils.WriteFile(env.TestFS, specPath, specContentV2, fileperms.PrivateFile))
-
-	_, err = componentcmds.UpdateComponents(env.Env, options)
+	exists, err := store.Exists("local-pkg")
 	require.NoError(t, err)
-
-	store = lockfile.NewStore(env.TestFS, testLockDir)
-	fp2 := mustGetFingerprint(t, store, "local-pkg")
-
-	assert.NotEqual(t, fp1, fp2, "fingerprint must change when spec content changes")
-}
-
-// mustGetFingerprint reads the fingerprint from a lock file, failing the test on error.
-func mustGetFingerprint(t *testing.T, store *lockfile.Store, name string) string {
-	t.Helper()
-
-	lock, err := store.Get(name)
-	require.NoError(t, err, "loading lock for %q", name)
-
-	return lock.InputFingerprint
+	assert.False(t, exists)
 }
 
 // TestUpdateComponents_AdvancesStaleLock is a regression test for the case
@@ -475,7 +371,6 @@ func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
 	freshStore = lockfile.NewStore(env.TestFS, testLockDir)
 	after, loadErr := freshStore.Get("curl")
 	require.NoError(t, loadErr)
-	assert.Equal(t, before.InputFingerprint, after.InputFingerprint)
 	assert.Equal(t, before.UpstreamCommit, after.UpstreamCommit)
 }
 

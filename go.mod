@@ -35,7 +35,6 @@ require (
 	github.com/magefile/mage v1.17.2
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/mattn/go-isatty v0.0.24
-	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/moby/moby/api v1.55.0
 	github.com/muesli/termenv v0.16.0
 	github.com/nxadm/tail v1.4.11

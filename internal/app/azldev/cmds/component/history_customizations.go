@@ -165,8 +165,7 @@ func appendSpecItems(
 		})
 	}
 
-	// Both Name and Version are real build inputs (only Snapshot carries
-	// fingerprint:"-"), so a version-only pin is a genuine customization.
+	// A version-only pin is a genuine customization.
 	if spec.UpstreamDistro.Name != "" || spec.UpstreamDistro.Version != "" {
 		items = append(items, CustomizationItem{
 			Kind:  "spec.upstream-distro",

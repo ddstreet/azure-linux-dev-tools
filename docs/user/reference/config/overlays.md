@@ -111,7 +111,7 @@ In addition to per-overlay fields, the following fields are set directly on the 
 
 ## Overlay Metadata
 
-Overlays can carry an optional `metadata` table that documents *why* the overlay exists and *when* it can be removed. Metadata is reviewed by humans and surfaced in tooling; it does **not** affect how the overlay is applied and is excluded from component fingerprints (so editing metadata never invalidates build caches).
+Overlays can carry an optional `metadata` table that documents *why* the overlay exists and *when* it can be removed. Metadata is reviewed by humans and surfaced in tooling; it does **not** affect how the overlay is applied.
 
 ### `metadata` fields
 

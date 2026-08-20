@@ -132,9 +132,9 @@ the config loads, so a missing field fails fast rather than at apply time.
 
 ## Document intent with `metadata`
 
-Give non-trivial overlays a `metadata` table. It is documentation only — excluded from
-the component fingerprint, so editing it never invalidates the build cache — but it
-records *why* the overlay exists and *when* it can be dropped. Every metadata block
+Give non-trivial overlays a `metadata` table. It is documentation only and does
+not change rendered output. It records *why* the overlay exists and *when* it
+can be dropped. Every metadata block
 requires `category`; pick the narrowest of:
 
 `upstream-backport`, `azl-pruning`, `azl-compatibility`, `azl-temp-workaround`,

@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	testFingerprintOld = "sha256:old"
-	testFingerprintNew = "sha256:new"
-	testSpecsDirSPECS  = "/SPECS"
+	testCommitOld     = "old"
+	testCommitNew     = "new"
+	testSpecsDirSPECS = "/SPECS"
 )
 
 // testRepoCommit represents the files added or updated in a single commit.
@@ -109,12 +109,11 @@ func marshalLock(t *testing.T, lock *lockfile.ComponentLock) []byte {
 	return data
 }
 
-// makeLock creates a lock with the given fingerprint and optional upstream commit.
-func makeLock(t *testing.T, fingerprint, upstreamCommit string) []byte {
+// makeLock creates a lock with the given upstream commit.
+func makeLock(t *testing.T, upstreamCommit string) []byte {
 	t.Helper()
 
 	lock := lockfile.New()
-	lock.InputFingerprint = fingerprint
 	lock.UpstreamCommit = upstreamCommit
 
 	return marshalLock(t, lock)
@@ -124,10 +123,10 @@ func makeLock(t *testing.T, fingerprint, upstreamCommit string) []byte {
 
 func TestClassifyComponent_Changed(t *testing.T) {
 	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: testFingerprintOld},
+		"curl": {UpstreamCommit: testCommitOld},
 	}
 	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: testFingerprintNew},
+		"curl": {UpstreamCommit: testCommitNew},
 	}
 
 	result := classifyComponent("curl", fromLocks, toLocks)
@@ -136,7 +135,7 @@ func TestClassifyComponent_Changed(t *testing.T) {
 
 func TestClassifyComponent_Unchanged(t *testing.T) {
 	locks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: "sha256:same"},
+		"curl": {UpstreamCommit: "same"},
 	}
 
 	result := classifyComponent("curl", locks, locks)
@@ -146,7 +145,7 @@ func TestClassifyComponent_Unchanged(t *testing.T) {
 func TestClassifyComponent_Added(t *testing.T) {
 	fromLocks := map[string]lockfile.ComponentLock{}
 	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: testFingerprintNew},
+		"curl": {UpstreamCommit: testCommitNew},
 	}
 
 	result := classifyComponent("curl", fromLocks, toLocks)
@@ -155,7 +154,7 @@ func TestClassifyComponent_Added(t *testing.T) {
 
 func TestClassifyComponent_Deleted(t *testing.T) {
 	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: testFingerprintOld},
+		"curl": {UpstreamCommit: testCommitOld},
 	}
 	toLocks := map[string]lockfile.ComponentLock{}
 
@@ -168,53 +167,6 @@ func TestClassifyComponent_NeverExisted(t *testing.T) {
 
 	result := classifyComponent("curl", empty, empty)
 	assert.Equal(t, changeTypeUnchanged, result.ChangeType)
-}
-
-// --- haveMatchingFingerprints tests ---
-
-func TestHaveMatchingFingerprints(t *testing.T) {
-	t.Parallel()
-
-	const fingerprint = "sha256:abc"
-
-	fromHas := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: fingerprint},
-	}
-	toHas := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: fingerprint},
-	}
-	toDifferent := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: "sha256:def"},
-	}
-	empty := map[string]lockfile.ComponentLock{}
-	emptyFingerprint := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: ""},
-	}
-
-	tests := []struct {
-		name string
-		from map[string]lockfile.ComponentLock
-		to   map[string]lockfile.ComponentLock
-		want bool
-	}{
-		{"both refs have lock with same fingerprint", fromHas, toHas, true},
-		{"both refs have lock but fingerprints differ", fromHas, toDifferent, false},
-		{"only from has a lock", fromHas, empty, false},
-		{"only to has a lock", empty, toHas, false},
-		{"neither ref has a lock (regression: must NOT report violation)", empty, empty, false},
-		{
-			"both refs have lock but fingerprint field is empty (regression: must NOT report violation)",
-			emptyFingerprint, emptyFingerprint, false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tt.want, haveMatchingFingerprints("curl", tt.from, tt.to))
-		})
-	}
 }
 
 // --- compareSources tests ---
@@ -299,11 +251,11 @@ func TestCompareSources_NoSourcesAtEitherRef(t *testing.T) {
 // --- Multi-component batch test ---
 
 func TestMultiComponentBatch(t *testing.T) {
-	curlFrom := lockfile.ComponentLock{InputFingerprint: "sha256:curl-v1"}
-	curlTo := lockfile.ComponentLock{InputFingerprint: "sha256:curl-v2"}
-	bashLock := lockfile.ComponentLock{InputFingerprint: "sha256:bash-v1"}
-	sedFrom := lockfile.ComponentLock{InputFingerprint: "sha256:sed-v1"}
-	sedTo := lockfile.ComponentLock{InputFingerprint: "sha256:sed-v2"}
+	curlFrom := lockfile.ComponentLock{UpstreamCommit: "curl-v1"}
+	curlTo := lockfile.ComponentLock{UpstreamCommit: "curl-v2"}
+	bashLock := lockfile.ComponentLock{UpstreamCommit: "bash-v1"}
+	sedFrom := lockfile.ComponentLock{UpstreamCommit: "sed-v1"}
+	sedTo := lockfile.ComponentLock{UpstreamCommit: "sed-v2"}
 
 	fromLocks := map[string]lockfile.ComponentLock{
 		"curl": curlFrom,
@@ -330,9 +282,9 @@ func TestMultiComponentBatch(t *testing.T) {
 // --- Incremental updates test ---
 
 func TestIncrementalUpdates(t *testing.T) {
-	lockV1 := makeLock(t, "sha256:v1", "aaa")
-	lockV2 := makeLock(t, "sha256:v2", "bbb")
-	lockV3 := makeLock(t, "sha256:v3", "ccc")
+	lockV1 := makeLock(t, "aaa")
+	lockV2 := makeLock(t, "bbb")
+	lockV3 := makeLock(t, "ccc")
 
 	repo, hashes := testRepoWithCommits(t, []testRepoCommit{
 		{files: map[string][]byte{
@@ -390,14 +342,14 @@ func TestIncrementalUpdates(t *testing.T) {
 
 func TestConfigOnlyChange(t *testing.T) {
 	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: "sha256:config-v1"},
+		"curl": {UpstreamCommit: "config-v1"},
 	}
 	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: "sha256:config-v2"},
+		"curl": {UpstreamCommit: "config-v2"},
 	}
 
 	result := classifyComponent("curl", fromLocks, toLocks)
-	assert.Equal(t, changeTypeChanged, result.ChangeType, "fingerprint changed")
+	assert.Equal(t, changeTypeChanged, result.ChangeType, "upstream commit changed")
 }
 
 // --- resolveTree / readFileFromTree / helpers ---
@@ -472,8 +424,8 @@ func TestReadFileFromTreeSafe_NotFound(t *testing.T) {
 // --- classifyComponent table-driven ---
 
 func TestClassifyComponent_TableDriven(t *testing.T) {
-	lockA := lockfile.ComponentLock{InputFingerprint: "sha256:aaa"}
-	lockB := lockfile.ComponentLock{InputFingerprint: "sha256:bbb"}
+	lockA := lockfile.ComponentLock{UpstreamCommit: "aaa"}
+	lockB := lockfile.ComponentLock{UpstreamCommit: "bbb"}
 
 	tests := []struct {
 		name           string
@@ -482,13 +434,13 @@ func TestClassifyComponent_TableDriven(t *testing.T) {
 		wantChangeType string
 	}{
 		{
-			name:           "both present, fingerprint changed",
+			name:           "both present, upstream commit changed",
 			fromLocks:      map[string]lockfile.ComponentLock{"curl": lockA},
 			toLocks:        map[string]lockfile.ComponentLock{"curl": lockB},
 			wantChangeType: changeTypeChanged,
 		},
 		{
-			name:           "both present, fingerprint same",
+			name:           "both present, upstream commit same",
 			fromLocks:      map[string]lockfile.ComponentLock{"curl": lockA},
 			toLocks:        map[string]lockfile.ComponentLock{"curl": lockA},
 			wantChangeType: changeTypeUnchanged,

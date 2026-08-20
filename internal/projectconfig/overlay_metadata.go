@@ -126,10 +126,11 @@ type URLRef struct {
 	URL string `toml:"url" json:"url" validate:"required,http_url" jsonschema:"required,format=uri,pattern=^https?://,title=URL,description=HTTP(S) link to the referenced resource"`
 }
 
-// OverlayMetadata describes the intent and provenance of an overlay. It is documentation
-// only — it does not affect how the overlay is applied and is excluded from component
-// fingerprints. When present, it must declare a [OverlayMetadata.Category]; other fields
-// are optional but constrained by category-specific rules (see [OverlayMetadata.Validate]).
+// OverlayMetadata describes the intent and provenance of an overlay. It is
+// documentation only and does not affect how the overlay is applied. When
+// present, it must declare a [OverlayMetadata.Category]; other fields are
+// optional but constrained by category-specific rules (see
+// [OverlayMetadata.Validate]).
 type OverlayMetadata struct {
 	// Category classifies the overlay's intent. Required.
 	Category OverlayCategory `toml:"category" json:"category" jsonschema:"required,enum=upstream-backport,enum=azl-pruning,enum=azl-compatibility,enum=azl-temp-workaround,enum=azl-branding-policy,enum=azl-disable-flaky-tests,enum=azl-disable-unsupported-tests,enum=azl-security-compliance,enum=azl-release-management,enum=azl-platform-adaptation,title=Category,description=Classification of the overlay's intent"`

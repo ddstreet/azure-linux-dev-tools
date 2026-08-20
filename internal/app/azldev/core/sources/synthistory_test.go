@@ -13,13 +13,12 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCommitInterleavedHistory_AllOnTop(t *testing.T) {
-	// When all fingerprint changes reference the latest upstream commit,
+	// When all lock changes reference the latest upstream commit,
 	// all synthetic commits should be appended on top.
 	memFS := memfs.New()
 	storer := memory.NewStorage()
@@ -60,7 +59,7 @@ func TestCommitInterleavedHistory_AllOnTop(t *testing.T) {
 
 	upstreamHash := upstreamCommit.String()
 
-	changes := []sources.FingerprintChange{
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "abc123",
@@ -177,7 +176,7 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, specFile.Close())
 
-	changes := []sources.FingerprintChange{
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "proj-aaa",
@@ -234,7 +233,7 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.T) {
 	// Simulates a realistic autorelease/autochangelog lifecycle:
 	//   upstream₁ → us₁(overlay) → us₂(config) → upstream₂ → us₃(overlay)
-	// Three fingerprint changes across two upstream commits, exercising
+	// Three lock changes across two upstream commits, exercising
 	// multiple interleaved changes on the same older upstream before a rebase.
 	memFS := memfs.New()
 	storer := memory.NewStorage()
@@ -288,7 +287,7 @@ func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.
 	_, _ = specFile.Write([]byte("Name: package\nVersion: 2.0\nRelease: %autorelease\n# v2 overlay\n"))
 	require.NoError(t, specFile.Close())
 
-	changes := []sources.FingerprintChange{
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash: "proj-aaa", Author: "Alice", AuthorEmail: "alice@example.com",
@@ -397,7 +396,7 @@ func TestCommitInterleavedHistory_SingleCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, specFile.Close())
 
-	changes := []sources.FingerprintChange{
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "abc123",
@@ -436,7 +435,7 @@ func TestCommitInterleavedHistory_SingleCommit(t *testing.T) {
 }
 
 func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
-	// When a fingerprint change references an upstream commit that doesn't
+	// When a lock change references an upstream commit that doesn't
 	// exist in the dist-git history, it should be dropped (not appended).
 	memFS := memfs.New()
 	storer := memory.NewStorage()
@@ -466,7 +465,7 @@ func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	changes := []sources.FingerprintChange{
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "proj-orphan",
@@ -514,7 +513,7 @@ func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
 }
 
 func TestCommitInterleavedHistory_LocalComponent(t *testing.T) {
-	// Local components have no upstream commits — all fingerprint changes
+	// Local components have no upstream commits — all lock changes
 	// have empty UpstreamCommit. The initial commit acts as the root and
 	// all synthetic commits are appended on top.
 	memFS := memfs.New()
@@ -555,7 +554,7 @@ func TestCommitInterleavedHistory_LocalComponent(t *testing.T) {
 	require.NoError(t, specFile.Close())
 
 	// All changes have empty UpstreamCommit (local component).
-	changes := []sources.FingerprintChange{
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "local-aaa",
@@ -741,8 +740,8 @@ func TestCommitInterleavedHistory_MergeCommitInUpstream(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, specFile.Close())
 
-	// Fingerprint change references the merge commit as upstream.
-	changes := []sources.FingerprintChange{
+	// Lock change references the merge commit as upstream.
+	changes := []sources.LockChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "proj-merge",
@@ -845,80 +844,6 @@ func TestParseCommitMetadata(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, test.want, got)
-		})
-	}
-}
-
-func TestBuildDirtyChange(t *testing.T) {
-	tests := []struct {
-		name                  string
-		currentFingerprint    string
-		headLock              *lockfile.ComponentLock
-		currentUpstreamCommit string
-		wantNil               bool
-		wantUpstream          string
-	}{
-		{
-			name:                  "empty fingerprint disables detection",
-			currentFingerprint:    "",
-			headLock:              &lockfile.ComponentLock{InputFingerprint: "sha256:abc123", UpstreamCommit: "old"},
-			currentUpstreamCommit: "new",
-			wantNil:               true,
-		},
-		{
-			name:                  "matching fingerprint returns nil",
-			currentFingerprint:    "sha256:abc123",
-			headLock:              &lockfile.ComponentLock{InputFingerprint: "sha256:abc123", UpstreamCommit: "old"},
-			currentUpstreamCommit: "new",
-			wantNil:               true,
-		},
-		{
-			name:                  "nil headLock returns nil",
-			currentFingerprint:    "sha256:abc123",
-			headLock:              nil,
-			currentUpstreamCommit: "new",
-			wantNil:               true,
-		},
-		{
-			name:                  "different fingerprint uses current upstream commit",
-			currentFingerprint:    "sha256:new",
-			headLock:              &lockfile.ComponentLock{InputFingerprint: "sha256:old", UpstreamCommit: "old-commit"},
-			currentUpstreamCommit: "new-commit",
-			wantUpstream:          "new-commit",
-		},
-		{
-			name:                  "uses current upstream even when it matches head lock",
-			currentFingerprint:    "sha256:new",
-			headLock:              &lockfile.ComponentLock{InputFingerprint: "sha256:old", UpstreamCommit: "same-commit"},
-			currentUpstreamCommit: "same-commit",
-			wantUpstream:          "same-commit",
-		},
-		{
-			name:                  "empty current upstream preserved for local components",
-			currentFingerprint:    "sha256:new",
-			headLock:              &lockfile.ComponentLock{InputFingerprint: "sha256:old", UpstreamCommit: ""},
-			currentUpstreamCommit: "",
-			wantUpstream:          "",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result := sources.BuildDirtyChange(test.currentFingerprint, test.headLock, test.currentUpstreamCommit)
-
-			if test.wantNil {
-				assert.Nil(t, result)
-
-				return
-			}
-
-			require.NotNil(t, result)
-			assert.Equal(t, "dirty", result.Hash)
-			assert.Equal(t, "azldev", result.Author)
-			assert.Equal(t, "azldev@local", result.AuthorEmail)
-			assert.Equal(t, "Local changes (uncommitted)", result.Message)
-			assert.Equal(t, test.wantUpstream, result.UpstreamCommit)
-			assert.NotZero(t, result.Timestamp)
 		})
 	}
 }
