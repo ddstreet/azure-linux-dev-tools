@@ -18,8 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const validLockTOML = `import-commit = "aaa111"
-upstream-commit = "bbb222"
+const validLockTOML = `upstream-commit = "bbb222"
 input-fingerprint = "fff000"
 `
 
@@ -66,7 +65,6 @@ func TestShowAtCommit(t *testing.T) {
 		lock, err := lockfile.ShowAtCommit(repo, commitHash, testLockRelPath)
 
 		require.NoError(t, err)
-		assert.Equal(t, "aaa111", lock.ImportCommit)
 		assert.Equal(t, "bbb222", lock.UpstreamCommit)
 		assert.Equal(t, "fff000", lock.InputFingerprint)
 	})
@@ -77,9 +75,9 @@ func TestShowAtCommit(t *testing.T) {
 		require.NoError(t, err)
 
 		states := []string{
-			"import-commit = \"aaa\"\n",
-			"import-commit = \"bbb\"\n",
-			"import-commit = \"ccc\"\n",
+			"upstream-commit = \"aaa\"\n",
+			"upstream-commit = \"bbb\"\n",
+			"upstream-commit = \"ccc\"\n",
 		}
 
 		var commits []string
@@ -94,7 +92,7 @@ func TestShowAtCommit(t *testing.T) {
 			require.NoError(t, err)
 
 			expected := []string{"aaa", "bbb", "ccc"}
-			assert.Equal(t, expected[i], lock.ImportCommit)
+			assert.Equal(t, expected[i], lock.UpstreamCommit)
 		}
 	})
 
@@ -146,7 +144,7 @@ func TestReadAllAtCommit(t *testing.T) {
 		commitFile(t, repo, testFS, "locks/curl.lock", validLockTOML, "add curl lock")
 		commitHash := commitFile(t, repo, testFS,
 			"locks/bash.lock",
-			"import-commit = \"bash111\"\nupstream-commit = \"bash222\"\ninput-fingerprint = \"bashfp\"\n",
+			"upstream-commit = \"bash222\"\ninput-fingerprint = \"bashfp\"\n",
 			"add bash lock",
 		)
 

@@ -83,7 +83,7 @@ func TestCommitInterleavedHistory_AllOnTop(t *testing.T) {
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, "")
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	// Verify the commit log: upstream + 2 synthetic = 3 commits.
@@ -200,14 +200,14 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, upstream1.String())
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	// Expected order (newest first):
 	// 1. "Fix for v2.0" (synthetic, on top — latest upstream, with overlay)
 	// 2. "upstream: v2.0" (replayed with new parent)
 	// 3. "Fix for v1.0" (synthetic, interleaved after upstream v1.0)
-	// 4. "upstream: v1.0" (import-commit, kept as-is)
+	// 4. "upstream: v1.0" (oldest upstream commit, kept as-is)
 	head, err := repo.Head()
 	require.NoError(t, err)
 
@@ -228,7 +228,7 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 	assert.Contains(t, logCommits[0].Message, "Fix for v2.0")   // top synthetic (latest)
 	assert.Contains(t, logCommits[1].Message, "upstream: v2.0") // replayed upstream 2
 	assert.Contains(t, logCommits[2].Message, "Fix for v1.0")   // interleaved synthetic
-	assert.Contains(t, logCommits[3].Message, "upstream: v1.0") // import-commit (kept)
+	assert.Contains(t, logCommits[3].Message, "upstream: v1.0") // oldest upstream commit (kept)
 }
 
 func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.T) {
@@ -315,7 +315,7 @@ func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, upstream1.String())
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	// Expected order (newest first):
@@ -341,7 +341,7 @@ func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.
 	assert.Contains(t, logCommits[1].Message, "upstream: v2.0")                // replayed upstream₂
 	assert.Contains(t, logCommits[2].Message, "Bump release for mass rebuild") // us₂ (interleaved)
 	assert.Contains(t, logCommits[3].Message, "Apply CVE patch for v1.0")      // us₁ (interleaved)
-	assert.Contains(t, logCommits[4].Message, "upstream: v1.0")                // import-commit
+	assert.Contains(t, logCommits[4].Message, "upstream: v1.0")                // oldest upstream commit
 
 	assert.Equal(t, "Carol", logCommits[0].Author.Name)
 	assert.Equal(t, "Bob", logCommits[2].Author.Name)
@@ -410,7 +410,7 @@ func TestCommitInterleavedHistory_SingleCommit(t *testing.T) {
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, "")
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	// Verify working tree changes are in the single synthetic commit.
@@ -489,7 +489,7 @@ func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, "")
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	head, err := repo.Head()
@@ -578,7 +578,7 @@ func TestCommitInterleavedHistory_LocalComponent(t *testing.T) {
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, "")
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	// Verify: initial commit + 2 synthetic = 3 commits.
@@ -755,14 +755,14 @@ func TestCommitInterleavedHistory_MergeCommitInUpstream(t *testing.T) {
 		},
 	}
 
-	err = sources.CommitInterleavedHistory(repo, changes, commitA.String())
+	err = sources.CommitInterleavedHistory(repo, changes)
 	require.NoError(t, err)
 
 	// Expected order (newest first):
 	// 1. "Fix for merged version" (synthetic, with overlay content)
 	// 2. "Merge branch 'feature'" (replayed merge, linearized)
 	// 3. "upstream: v2.0" (replayed)
-	// 4. "upstream: v1.0" (import-commit, kept as-is)
+	// 4. "upstream: v1.0" (oldest upstream commit, kept as-is)
 	// The side-branch commit F should NOT appear.
 	newHead, err := repo.Head()
 	require.NoError(t, err)
@@ -784,7 +784,7 @@ func TestCommitInterleavedHistory_MergeCommitInUpstream(t *testing.T) {
 	assert.Contains(t, logCommits[0].Message, "Fix for merged version") // synthetic
 	assert.Contains(t, logCommits[1].Message, "Merge branch 'feature'") // linearized merge
 	assert.Contains(t, logCommits[2].Message, "upstream: v2.0")         // replayed
-	assert.Contains(t, logCommits[3].Message, "upstream: v1.0")         // import-commit
+	assert.Contains(t, logCommits[3].Message, "upstream: v1.0")         // oldest upstream commit
 
 	// All replayed commits should have exactly 1 parent (linearized).
 	for i := range 3 {

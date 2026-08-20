@@ -514,7 +514,7 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 		}
 	}
 
-	changes, importCommit, err := buildSyntheticCommits(
+	changes, err := buildSyntheticCommits(
 		ctx, p.cmdFactory, config, componentName, p.lockReader.LockDir(),
 		currentFingerprint,
 	)
@@ -563,7 +563,7 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 		return fmt.Errorf("failed to remove submodule entries:\n%w", err)
 	}
 
-	if err := CommitInterleavedHistory(sourcesRepo, changes, importCommit); err != nil {
+	if err := CommitInterleavedHistory(sourcesRepo, changes); err != nil {
 		return fmt.Errorf("failed to commit synthetic history:\n%w", err)
 	}
 

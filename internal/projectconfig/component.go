@@ -339,8 +339,6 @@ func (f FreshnessStatus) String() string {
 type ComponentLockData struct {
 	// UpstreamCommit is the resolved upstream commit from the lock file.
 	UpstreamCommit string `json:"upstreamCommit,omitempty"`
-	// ImportCommit is the upstream commit at fork time (write-once).
-	ImportCommit string `json:"importCommit,omitempty"`
 	// InputFingerprint is the stored fingerprint from the last update.
 	// Covers build inputs (config, overlays, commit, release ver)
 	// but excludes resolution inputs like snapshot timestamp.

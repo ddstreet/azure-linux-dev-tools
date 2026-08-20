@@ -150,8 +150,8 @@ func (g *GitProviderImpl) GetCommitHashBeforeDate(
 		// Using --first-parent ensures the resolved commit is on the target
 		// branch's mainline, not on a merged-in side branch. This prevents
 		// upstream-commit from landing on a different branch's lineage
-		// (e.g. f44 commits merged into f43), which would cause the
-		// synthetic history walk to fail when it can't reach import-commit.
+		// (e.g. f44 commits merged into f43), which the synthetic history
+		// walk cannot replay on the target branch's first-parent history.
 		cmd = exec.CommandContext(
 			ctx, "git", "-C", repoDir, "rev-list", "-1", "--first-parent",
 			"--before="+dateTime.Format(time.RFC3339), "HEAD",

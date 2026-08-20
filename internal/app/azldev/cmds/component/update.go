@@ -359,20 +359,6 @@ func updateComponentLock(env *azldev.Env, store *lockfile.Store, result *UpdateR
 
 	lock.UpstreamCommit = result.UpstreamCommit
 
-	// Clear upstream-only fields for local components so a source-type
-	// transition (upstream → local) doesn't leave stale data in the lock.
-	if result.config != nil &&
-		result.config.Spec.SourceType != projectconfig.SpecSourceTypeUpstream {
-		lock.ImportCommit = ""
-	}
-
-	// Seed import-commit on first update so the synthetic history walk
-	// has a bounded starting point instead of walking the entire repo.
-	if lock.ImportCommit == "" && result.config != nil &&
-		result.config.Spec.SourceType == projectconfig.SpecSourceTypeUpstream {
-		lock.ImportCommit = result.UpstreamCommit
-	}
-
 	// Recompute fingerprint from resolved config + lock state.
 	if result.config == nil {
 		return false, fmt.Errorf("no resolved config for %#q; cannot compute fingerprint", result.Component)

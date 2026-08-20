@@ -35,7 +35,6 @@ func mustLockPath(t *testing.T, componentName string) string {
 func TestNew(t *testing.T) {
 	lock := lockfile.New()
 	assert.Empty(t, lock.UpstreamCommit)
-	assert.Empty(t, lock.ImportCommit)
 	assert.Empty(t, lock.InputFingerprint)
 }
 
@@ -108,7 +107,6 @@ func TestSaveAndLoad(t *testing.T) {
 
 	original := lockfile.New()
 	original.UpstreamCommit = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-	original.ImportCommit = "0000111122223333444455556666777788889999"
 	original.InputFingerprint = "sha256:abcdef1234567890"
 
 	require.NoError(t, original.Save(memFS, lockPath))
@@ -117,7 +115,6 @@ func TestSaveAndLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", loaded.UpstreamCommit)
-	assert.Equal(t, "0000111122223333444455556666777788889999", loaded.ImportCommit)
 	assert.Equal(t, "sha256:abcdef1234567890", loaded.InputFingerprint)
 }
 
@@ -156,12 +153,14 @@ func TestLoadInvalidTOML(t *testing.T) {
 	assert.ErrorContains(t, err, "parsing lock file")
 }
 
-func TestSaveOmitsLegacyVersion(t *testing.T) {
+func TestSaveOmitsRemovedFields(t *testing.T) {
 	memFS := afero.NewMemMapFs()
 	lockPath, err := lockfile.LockPath(testLockDir, "test")
 	require.NoError(t, err)
 
-	lock, err := lockfile.Parse([]byte("version = 99\ninput-fingerprint = \"sha256:test\"\n"))
+	lock, err := lockfile.Parse([]byte(
+		"version = 99\nimport-commit = \"legacy\"\ninput-fingerprint = \"sha256:test\"\n",
+	))
 	require.NoError(t, err)
 	require.NoError(t, lock.Save(memFS, lockPath))
 
@@ -169,6 +168,7 @@ func TestSaveOmitsLegacyVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotContains(t, string(data), "version")
+	assert.NotContains(t, string(data), "import-commit")
 	assert.Contains(t, string(data), "input-fingerprint")
 }
 
@@ -185,9 +185,7 @@ func TestLocalComponentRoundTrip(t *testing.T) {
 
 	loaded, err := lockfile.Load(memFS, lockPath)
 	require.NoError(t, err)
-
 	assert.Empty(t, loaded.UpstreamCommit)
-	assert.Empty(t, loaded.ImportCommit)
 	assert.Equal(t, "sha256:localfp", loaded.InputFingerprint)
 }
 
@@ -252,36 +250,6 @@ func TestMultipleComponentsIndependentFiles(t *testing.T) {
 	}
 }
 
-func TestImportCommitPreservedOnRewrite(t *testing.T) {
-	memFS := afero.NewMemMapFs()
-	lockPath, err := lockfile.LockPath(testLockDir, "curl")
-	require.NoError(t, err)
-
-	// First write: set import-commit and upstream-commit to same value (initial import).
-	original := lockfile.New()
-	original.ImportCommit = "initial-import-commit"
-	original.UpstreamCommit = "initial-import-commit"
-
-	require.NoError(t, original.Save(memFS, lockPath))
-
-	// Simulate what update does: load, update upstream-commit, preserve import-commit.
-	loaded, err := lockfile.Load(memFS, lockPath)
-	require.NoError(t, err)
-
-	// Import-commit should not be changed — it's write-once.
-	assert.Equal(t, "initial-import-commit", loaded.ImportCommit)
-
-	loaded.UpstreamCommit = "newer-upstream-commit"
-
-	require.NoError(t, loaded.Save(memFS, lockPath))
-
-	// Reload and verify import-commit survived while upstream-commit moved.
-	reloaded, err := lockfile.Load(memFS, lockPath)
-	require.NoError(t, err)
-	assert.Equal(t, "initial-import-commit", reloaded.ImportCommit, "import-commit should be preserved")
-	assert.Equal(t, "newer-upstream-commit", reloaded.UpstreamCommit, "upstream-commit should be updated")
-}
-
 func TestResolutionInputHashRoundTrip(t *testing.T) {
 	memFS := afero.NewMemMapFs()
 	lockPath, err := lockfile.LockPath(testLockDir, "curl")
@@ -314,7 +282,6 @@ func TestOmitEmptyFields(t *testing.T) {
 	require.NoError(t, err)
 
 	content := string(data)
-	assert.NotContains(t, content, "import-commit", "empty import-commit should be omitted")
 	assert.NotContains(t, content, "upstream-commit", "empty upstream-commit should be omitted")
 	assert.NotContains(t, content, "resolution-input-hash", "empty resolution-input-hash should be omitted")
 	assert.Contains(t, content, "input-fingerprint")
@@ -338,7 +305,6 @@ func TestStoreGetOrNew_ExistingComponent(t *testing.T) {
 	// Save a lock with data.
 	original := lockfile.New()
 	original.UpstreamCommit = testCommitHash
-	original.ImportCommit = "import-hash"
 
 	require.NoError(t, store.Save("curl", original))
 
@@ -346,7 +312,6 @@ func TestStoreGetOrNew_ExistingComponent(t *testing.T) {
 	lock, err := store.GetOrNew("curl")
 	require.NoError(t, err)
 	assert.Equal(t, testCommitHash, lock.UpstreamCommit)
-	assert.Equal(t, "import-hash", lock.ImportCommit)
 }
 
 func TestStoreGetOrNew_CorruptLock_ReturnsError(t *testing.T) {
@@ -731,9 +696,8 @@ func TestFindOrphanLockFiles_EmptyDirNoOrphans(t *testing.T) {
 }
 
 // Regression: corrupt lock files (bad TOML) must surface errors from Get and
-// GetOrNew so callers (e.g., update) treat them as failures — we never silently
-// overwrite because import-commit data would be lost. Save can still overwrite
-// if the user manually fixes the situation.
+// GetOrNew so callers (e.g., update) treat them as failures instead of silently
+// overwriting unreadable state. Save can still overwrite after manual repair.
 func TestStoreGet_CorruptLockReturnsError(t *testing.T) {
 	memFS := afero.NewMemMapFs()
 	store := lockfile.NewStore(memFS, testLockDir)

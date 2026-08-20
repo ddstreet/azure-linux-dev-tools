@@ -26,12 +26,6 @@ const lockFileExtension = ".lock"
 
 // ComponentLock holds the locked state for a single component.
 type ComponentLock struct {
-	// ImportCommit is the upstream commit hash at the time of initial import
-	// (fork point). Upstream changelog up to this commit is inherited verbatim.
-	// Write-once: set on first import, never changed afterwards.
-	// Empty for local components.
-	ImportCommit string `toml:"import-commit,omitempty"`
-
 	// UpstreamCommit is the current resolved upstream commit hash.
 	// Updated by 'component update' when upstream sources are re-resolved.
 	// Empty for local components.
