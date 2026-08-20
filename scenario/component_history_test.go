@@ -103,12 +103,12 @@ func TestComponentHistory_Smoke(t *testing.T) {
 	// Seed two commits to curl's lock file with distinct fingerprints so the
 	// fp-change details path has something to report.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		`version = 1`+"\n"+`input-fingerprint = "sha256:curl-v1"`+"\n")
+		`input-fingerprint = "sha256:curl-v1"`+"\n")
 	gitInDir(t, projectDir, "add", "locks/curl.lock")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "curl: initial lock")
 
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		`version = 1`+"\n"+`input-fingerprint = "sha256:curl-v2"`+"\n")
+		`input-fingerprint = "sha256:curl-v2"`+"\n")
 	gitInDir(t, projectDir, "add", "locks/curl.lock")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "curl: bump fingerprint")
 

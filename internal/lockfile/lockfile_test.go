@@ -34,7 +34,6 @@ func mustLockPath(t *testing.T, componentName string) string {
 
 func TestNew(t *testing.T) {
 	lock := lockfile.New()
-	assert.Equal(t, 1, lock.Version)
 	assert.Empty(t, lock.UpstreamCommit)
 	assert.Empty(t, lock.ImportCommit)
 	assert.Empty(t, lock.InputFingerprint)
@@ -117,7 +116,6 @@ func TestSaveAndLoad(t *testing.T) {
 	loaded, err := lockfile.Load(memFS, lockPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, loaded.Version)
 	assert.Equal(t, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", loaded.UpstreamCommit)
 	assert.Equal(t, "0000111122223333444455556666777788889999", loaded.ImportCommit)
 	assert.Equal(t, "sha256:abcdef1234567890", loaded.InputFingerprint)
@@ -139,20 +137,6 @@ func TestSaveCreatesDirectory(t *testing.T) {
 	assert.Equal(t, testCommitHash, loaded.UpstreamCommit)
 }
 
-func TestLoadUnsupportedVersion(t *testing.T) {
-	memFS := afero.NewMemMapFs()
-	lockPath, err := lockfile.LockPath(testLockDir, "bad")
-	require.NoError(t, err)
-
-	content := "version = 99\n"
-
-	require.NoError(t, fileutils.MkdirAll(memFS, filepath.Dir(lockPath)))
-	require.NoError(t, fileutils.WriteFile(memFS, lockPath, []byte(content), fileperms.PublicFile))
-
-	_, err = lockfile.Load(memFS, lockPath)
-	assert.ErrorContains(t, err, "unsupported lock file version")
-}
-
 func TestLoadMissingFile(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
@@ -172,18 +156,20 @@ func TestLoadInvalidTOML(t *testing.T) {
 	assert.ErrorContains(t, err, "parsing lock file")
 }
 
-func TestSaveContainsVersion(t *testing.T) {
+func TestSaveOmitsLegacyVersion(t *testing.T) {
 	memFS := afero.NewMemMapFs()
 	lockPath, err := lockfile.LockPath(testLockDir, "test")
 	require.NoError(t, err)
 
-	lock := lockfile.New()
+	lock, err := lockfile.Parse([]byte("version = 99\ninput-fingerprint = \"sha256:test\"\n"))
+	require.NoError(t, err)
 	require.NoError(t, lock.Save(memFS, lockPath))
 
 	data, err := fileutils.ReadFile(memFS, lockPath)
 	require.NoError(t, err)
 
-	assert.Contains(t, string(data), "version = 1")
+	assert.NotContains(t, string(data), "version")
+	assert.Contains(t, string(data), "input-fingerprint")
 }
 
 func TestLocalComponentRoundTrip(t *testing.T) {
@@ -318,7 +304,7 @@ func TestOmitEmptyFields(t *testing.T) {
 	lockPath, err := lockfile.LockPath(testLockDir, "local-pkg")
 	require.NoError(t, err)
 
-	// Local component: only version and fingerprint set.
+	// Local component: only fingerprint set.
 	lock := lockfile.New()
 	lock.InputFingerprint = "sha256:local"
 
@@ -342,7 +328,6 @@ func TestStoreGetOrNew_NewComponent(t *testing.T) {
 
 	lock, err := store.GetOrNew("newpkg")
 	require.NoError(t, err)
-	assert.Equal(t, 1, lock.Version)
 	assert.Empty(t, lock.UpstreamCommit)
 }
 
@@ -832,16 +817,15 @@ func TestStoreValidateConsistency(t *testing.T) {
 }
 
 func TestParse_EmptyContent(t *testing.T) {
-	// Empty content has version=0 which doesn't match currentVersion=1.
-	_, err := lockfile.Parse([]byte(""))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported lock file version")
+	lock, err := lockfile.Parse([]byte(""))
+	require.NoError(t, err)
+	assert.Empty(t, lock.UpstreamCommit)
 }
 
-func TestParse_VersionZero(t *testing.T) {
-	_, err := lockfile.Parse([]byte("version = 0"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported lock file version")
+func TestParse_IgnoresLegacyVersion(t *testing.T) {
+	lock, err := lockfile.Parse([]byte("version = 99\nupstream-commit = \"abc\"\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "abc", lock.UpstreamCommit)
 }
 
 func TestParse_GarbageContent(t *testing.T) {
@@ -851,9 +835,8 @@ func TestParse_GarbageContent(t *testing.T) {
 }
 
 func TestParse_ValidMinimal(t *testing.T) {
-	lock, err := lockfile.Parse([]byte("version = 1\n"))
+	lock, err := lockfile.Parse([]byte(""))
 	require.NoError(t, err)
-	assert.Equal(t, 1, lock.Version)
 	assert.Empty(t, lock.UpstreamCommit)
 }
 

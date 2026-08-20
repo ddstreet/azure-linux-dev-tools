@@ -18,8 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const validLockTOML = `version = 1
-import-commit = "aaa111"
+const validLockTOML = `import-commit = "aaa111"
 upstream-commit = "bbb222"
 input-fingerprint = "fff000"
 `
@@ -67,26 +66,25 @@ func TestShowAtCommit(t *testing.T) {
 		lock, err := lockfile.ShowAtCommit(repo, commitHash, testLockRelPath)
 
 		require.NoError(t, err)
-		assert.Equal(t, 1, lock.Version)
 		assert.Equal(t, "aaa111", lock.ImportCommit)
 		assert.Equal(t, "bbb222", lock.UpstreamCommit)
 		assert.Equal(t, "fff000", lock.InputFingerprint)
 	})
 
-	t.Run("reads correct version at each commit", func(t *testing.T) {
+	t.Run("reads correct state at each commit", func(t *testing.T) {
 		testFS := memfs.New()
 		repo, err := gogit.Init(memory.NewStorage(), testFS)
 		require.NoError(t, err)
 
-		versions := []string{
-			"version = 1\nimport-commit = \"aaa\"\n",
-			"version = 1\nimport-commit = \"bbb\"\n",
-			"version = 1\nimport-commit = \"ccc\"\n",
+		states := []string{
+			"import-commit = \"aaa\"\n",
+			"import-commit = \"bbb\"\n",
+			"import-commit = \"ccc\"\n",
 		}
 
 		var commits []string
 
-		for i, content := range versions {
+		for i, content := range states {
 			hash := commitFile(t, repo, testFS, testLockRelPath, content, fmt.Sprintf("v%d", i))
 			commits = append(commits, hash)
 		}
@@ -124,18 +122,6 @@ func TestShowAtCommit(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to parse lock file")
 	})
 
-	t.Run("wrong version", func(t *testing.T) {
-		fs := memfs.New()
-		repo, err := gogit.Init(memory.NewStorage(), fs)
-		require.NoError(t, err)
-
-		commitHash := commitFile(t, repo, fs, testLockRelPath, "version = 99\n", "bad version")
-
-		_, err = lockfile.ShowAtCommit(repo, commitHash, testLockRelPath)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported lock file version")
-	})
-
 	t.Run("bad commit hash", func(t *testing.T) {
 		fs := memfs.New()
 		repo, err := gogit.Init(memory.NewStorage(), fs)
@@ -160,7 +146,7 @@ func TestReadAllAtCommit(t *testing.T) {
 		commitFile(t, repo, testFS, "locks/curl.lock", validLockTOML, "add curl lock")
 		commitHash := commitFile(t, repo, testFS,
 			"locks/bash.lock",
-			"version = 1\nimport-commit = \"bash111\"\nupstream-commit = \"bash222\"\ninput-fingerprint = \"bashfp\"\n",
+			"import-commit = \"bash111\"\nupstream-commit = \"bash222\"\ninput-fingerprint = \"bashfp\"\n",
 			"add bash lock",
 		)
 

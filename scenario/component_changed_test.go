@@ -157,8 +157,8 @@ func TestComponentChanged_E2E(t *testing.T) {
 	gitInDir(t, projectDir, "config", "user.email", "test@test.com")
 	gitInDir(t, projectDir, "config", "user.name", "Test")
 
-	lockV1Curl := fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:curl-v1")
-	lockV1Bash := fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:bash-v1")
+	lockV1Curl := fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v1")
+	lockV1Bash := fmt.Sprintf("input-fingerprint = %q\n", "sha256:bash-v1")
 
 	writeFileInDir(t, projectDir, "locks/curl.lock", lockV1Curl)
 	writeFileInDir(t, projectDir, "locks/bash.lock", lockV1Bash)
@@ -169,7 +169,7 @@ func TestComponentChanged_E2E(t *testing.T) {
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Second commit: change curl's lock, leave bash unchanged.
-	lockV2Curl := fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:curl-v2")
+	lockV2Curl := fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v2")
 	writeFileInDir(t, projectDir, "locks/curl.lock", lockV2Curl)
 
 	gitInDir(t, projectDir, "add", "locks/curl.lock")
@@ -243,7 +243,7 @@ func TestComponentChanged_SameRef(t *testing.T) {
 	gitInDir(t, projectDir, "config", "user.email", "test@test.com")
 	gitInDir(t, projectDir, "config", "user.name", "Test")
 
-	lockContent := fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:v1")
+	lockContent := fmt.Sprintf("input-fingerprint = %q\n", "sha256:v1")
 	writeFileInDir(t, projectDir, "locks/curl.lock", lockContent)
 
 	gitInDir(t, projectDir, "add", ".")
@@ -388,7 +388,7 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 
 	// Commit 1: initial lock + rendered sources.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.0.tar.gz) = aaa111")
 	gitInDir(t, projectDir, "add", ".")
@@ -397,7 +397,7 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 
 	// Commit 2: change lock fingerprint AND sources (new tarball).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:v2"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v2"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.1.tar.gz) = bbb222")
 	gitInDir(t, projectDir, "add", ".")
@@ -406,7 +406,7 @@ func TestComponentChanged_SourcesChange(t *testing.T) {
 
 	// Commit 3: change lock fingerprint only (config tweak, same tarball).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:v3"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v3"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "config change")
 
@@ -461,14 +461,14 @@ func TestComponentChanged_InvertedRefs(t *testing.T) {
 
 	// Commit 1: v1 lock.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:old"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:old"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "v1")
 	oldRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
 
 	// Commit 2: v2 lock.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:new"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:new"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "v2")
 	newRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
@@ -527,7 +527,7 @@ func TestComponentChanged_NewComponent(t *testing.T) {
 
 	// Commit 2: add curl lock.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:first"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:first"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "add curl")
 
@@ -572,9 +572,9 @@ func TestComponentChanged_DeletedComponent(t *testing.T) {
 
 	// Commit 1: lock files for curl (in config) and oldpkg (NOT in config).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:curl-v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v1"))
 	writeFileInDir(t, projectDir, "locks/oldpkg.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:oldpkg-v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:oldpkg-v1"))
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 	fromRef := gitInDir(t, projectDir, "rev-parse", "HEAD")
@@ -644,11 +644,11 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 
 	// Commit 1: curl has lock + sources, bash has lock, oldpkg has lock (not in config).
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:curl-v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v1"))
 	writeFileInDir(t, projectDir, "locks/bash.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:bash-v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:bash-v1"))
 	writeFileInDir(t, projectDir, "locks/oldpkg.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:old-v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:old-v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-1.0.tar.gz) = aaa")
 	gitInDir(t, projectDir, "add", ".")
@@ -657,7 +657,7 @@ func TestComponentChanged_JSONContract(t *testing.T) {
 
 	// Commit 2: curl fingerprint + sources changed, bash unchanged, oldpkg removed.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:curl-v2"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:curl-v2"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-2.0.tar.gz) = bbb")
 	gitInDir(t, projectDir, "rm", "locks/oldpkg.lock")
@@ -763,7 +763,7 @@ func TestComponentChanged_IntegrityViolation(t *testing.T) {
 
 	// Commit 1: lock + matching rendered sources.
 	writeFileInDir(t, projectDir, "locks/curl.lock",
-		fmt.Sprintf("version = 1\ninput-fingerprint = %q\n", "sha256:v1"))
+		fmt.Sprintf("input-fingerprint = %q\n", "sha256:v1"))
 	writeFileInDir(t, projectDir, "specs/c/curl/sources",
 		"SHA512 (curl-8.0.tar.gz) = aaa111")
 	gitInDir(t, projectDir, "add", ".")
