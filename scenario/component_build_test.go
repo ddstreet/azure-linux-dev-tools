@@ -127,7 +127,7 @@ func TestBuildingUpstreamComponent(t *testing.T) {
 	)
 
 	// Run the build with test default configs copied into the container.
-	// component update populates lock files first (required by lock validation).
+	// component update generates the upstream commit configuration first.
 	results := buildtest.NewBuildTest(project, testComponentName,
 		projecttest.WithTestDefaultConfigs(),
 		projecttest.WithPreCommand("component", "update", "-a"),

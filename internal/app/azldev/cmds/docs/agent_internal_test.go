@@ -21,11 +21,11 @@ func TestRepoRelativeDir(t *testing.T) {
 		absPath    string
 		want       string
 	}{
-		{name: "immediate subdir", projectDir: "/project", absPath: "/project/locks", want: "locks"},
-		{name: "nested subdir", projectDir: "/project", absPath: "/project/build/locks", want: "build/locks"},
+		{name: "immediate subdir", projectDir: "/project", absPath: "/project/config", want: "config"},
+		{name: "nested subdir", projectDir: "/project", absPath: "/project/build/config", want: "build/config"},
 		{name: "project root maps to empty", projectDir: "/project", absPath: "/project", want: ""},
-		{name: "outside tree maps to empty", projectDir: "/project", absPath: "/elsewhere/locks", want: ""},
-		{name: "empty project dir", projectDir: "", absPath: "/project/locks", want: ""},
+		{name: "outside tree maps to empty", projectDir: "/project", absPath: "/elsewhere/config", want: ""},
+		{name: "empty project dir", projectDir: "", absPath: "/project/config", want: ""},
 		{name: "empty path", projectDir: "/project", absPath: "", want: ""},
 	}
 
@@ -41,7 +41,7 @@ func TestResolveBindingsDegradesToDefaults(t *testing.T) {
 	// emitted documentation stays accurate for a default project.
 	bindings := resolveBindings(nil)
 
-	assert.Equal(t, projectconfig.DefaultLockDir, bindings.LockDir)
+	assert.Equal(t, "base/upstream-commits", bindings.UpstreamCommitsDir)
 	assert.Equal(t, projectconfig.DefaultRenderedSpecsDir, bindings.RenderedSpecsDir)
 	assert.Equal(t, projectconfig.DefaultWorkDir, bindings.WorkDir)
 }
@@ -51,7 +51,6 @@ func TestResolveBindingsFromConfig(t *testing.T) {
 
 	// Override the project directories to prove they are resolved (not just defaulted).
 	cfg := *testEnv.Config
-	cfg.Project.LockDir = "/project/build/locks"
 	cfg.Project.RenderedSpecsDir = "/project/build/specs"
 	cfg.Project.WorkDir = "/project/build/work"
 
@@ -66,7 +65,7 @@ func TestResolveBindingsFromConfig(t *testing.T) {
 
 	bindings := resolveBindings(env)
 
-	assert.Equal(t, "build/locks", bindings.LockDir)
+	assert.Equal(t, "base/upstream-commits", bindings.UpstreamCommitsDir)
 	assert.Equal(t, "build/specs", bindings.RenderedSpecsDir)
 	assert.Equal(t, "build/work", bindings.WorkDir)
 }

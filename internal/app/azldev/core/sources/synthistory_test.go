@@ -18,7 +18,7 @@ import (
 )
 
 func TestCommitInterleavedHistory_AllOnTop(t *testing.T) {
-	// When all lock changes reference the latest upstream commit,
+	// When all generated config changes reference the latest upstream commit,
 	// all synthetic commits should be appended on top.
 	memFS := memfs.New()
 	storer := memory.NewStorage()
@@ -59,7 +59,7 @@ func TestCommitInterleavedHistory_AllOnTop(t *testing.T) {
 
 	upstreamHash := upstreamCommit.String()
 
-	changes := []sources.LockChange{
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "abc123",
@@ -176,7 +176,7 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, specFile.Close())
 
-	changes := []sources.LockChange{
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "proj-aaa",
@@ -233,7 +233,7 @@ func TestCommitInterleavedHistory_Interleaved(t *testing.T) {
 func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.T) {
 	// Simulates a realistic autorelease/autochangelog lifecycle:
 	//   upstream₁ → us₁(overlay) → us₂(config) → upstream₂ → us₃(overlay)
-	// Three lock changes across two upstream commits, exercising
+	// Three generated config changes across two upstream commits, exercising
 	// multiple interleaved changes on the same older upstream before a rebase.
 	memFS := memfs.New()
 	storer := memory.NewStorage()
@@ -287,7 +287,7 @@ func TestCommitInterleavedHistory_MultipleCyclesAutoreleaseLifecycle(t *testing.
 	_, _ = specFile.Write([]byte("Name: package\nVersion: 2.0\nRelease: %autorelease\n# v2 overlay\n"))
 	require.NoError(t, specFile.Close())
 
-	changes := []sources.LockChange{
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash: "proj-aaa", Author: "Alice", AuthorEmail: "alice@example.com",
@@ -396,7 +396,7 @@ func TestCommitInterleavedHistory_SingleCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, specFile.Close())
 
-	changes := []sources.LockChange{
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "abc123",
@@ -435,7 +435,7 @@ func TestCommitInterleavedHistory_SingleCommit(t *testing.T) {
 }
 
 func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
-	// When a lock change references an upstream commit that doesn't
+	// When a generated config change references an upstream commit that doesn't
 	// exist in the dist-git history, it should be dropped (not appended).
 	memFS := memfs.New()
 	storer := memory.NewStorage()
@@ -465,7 +465,7 @@ func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	changes := []sources.LockChange{
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "proj-orphan",
@@ -513,7 +513,7 @@ func TestCommitInterleavedHistory_OrphanUpstreamCommit(t *testing.T) {
 }
 
 func TestCommitInterleavedHistory_LocalComponent(t *testing.T) {
-	// Local components have no upstream commits — all lock changes
+	// Local components have no upstream commits — all generated config changes
 	// have empty UpstreamCommit. The initial commit acts as the root and
 	// all synthetic commits are appended on top.
 	memFS := memfs.New()
@@ -554,7 +554,7 @@ func TestCommitInterleavedHistory_LocalComponent(t *testing.T) {
 	require.NoError(t, specFile.Close())
 
 	// All changes have empty UpstreamCommit (local component).
-	changes := []sources.LockChange{
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "local-aaa",
@@ -740,8 +740,8 @@ func TestCommitInterleavedHistory_MergeCommitInUpstream(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, specFile.Close())
 
-	// Lock change references the merge commit as upstream.
-	changes := []sources.LockChange{
+	// The generated config change references the merge commit as upstream.
+	changes := []sources.UpstreamCommitChange{
 		{
 			CommitMetadata: sources.CommitMetadata{
 				Hash:        "proj-merge",

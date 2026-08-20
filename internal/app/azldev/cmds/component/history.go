@@ -58,7 +58,7 @@ func NewHistoryCmd() *cobra.Command {
 
   - toml-commits:    commits to the component's source TOML file
   - customizations:  count of explicit customization items in the config
-  - lock-changes:    commits that changed the component's lock file
+  - upstream-commit-changes: commits that changed the generated upstream-commit TOML
 
 Use this to find which packages get the most attention (for documentation,
 review prioritization, or refactoring planning).
@@ -127,9 +127,6 @@ hand-picking entries to document.`,
 		"Include components with zero customizations in the output. "+
 			"By default they are hidden -- their config inherits everything from defaults, "+
 			"and computing their git metrics is the dominant cost on large projects.")
-
-	// History is read-only; the lock validation flag is meaningless here.
-	_ = cmd.Flags().MarkHidden("skip-lock-validation")
 
 	azldev.ExportAsReadOnlyMCPTool(cmd)
 
@@ -202,29 +199,25 @@ type HistoryResult struct {
 	// invocations.
 	CustomizationItems []CustomizationItem `json:"customizationItems,omitempty" table:"-"`
 
-	// LockChanges is the number of commits that changed the lock file.
-	LockChanges int `json:"lockChanges"`
+	// UpstreamCommitChanges is the number of generated commit TOML changes.
+	UpstreamCommitChanges int `json:"upstreamCommitChanges"`
 
-	// LockChangeDetails is the per-commit metadata for each lock change
-	// counted in [LockChanges] (oldest first).
+	// UpstreamCommitChangeDetails is the per-commit metadata for each change.
 	// Hidden from the human-readable table -- use JSON output to consume
 	// them (e.g., to hand-author changelog entries).
 	//
-	// Each entry is populated from [sources.LockChange] via an
-	// explicit field-by-field copy in [populateLockMetrics]. The
+	// Each entry is populated from [sources.UpstreamCommitChange] via an
+	// explicit field-by-field copy in [populateUpstreamCommitMetrics]. The
 	// gathering algorithm is shared with the synthetic dist-git history
 	// flow; the wire-level type is local so that:
 	//   - the JSON contract for this command lives in this file, and
-	//   - removing a field from [sources.LockChange] /
+	//   - removing a field from [sources.UpstreamCommitChange] /
 	//     [sources.CommitMetadata] surfaces as a compile error at the
 	//     copy site rather than silently dropping changelog metadata.
 	// The compile-error guard is one-directional (it catches REMOVED
 	// upstream fields); a NEWLY ADDED upstream field is caught instead by
-	// TestLockChangeDTOMirrorsSource.
-	LockChangeDetails []LockChange `json:"lockChangeDetails,omitempty" table:"-"`
-
-	// HasLock is true when a lock file currently exists for this component.
-	HasLock bool `json:"hasLock,omitempty" table:"-"`
+	// TestUpstreamCommitChangeDTOMirrorsSource.
+	UpstreamCommitChangeDetails []UpstreamCommitChange `json:"upstreamCommitChangeDetails,omitempty" table:"-"`
 
 	// Warnings collects per-component diagnostics for failure paths that
 	// were swallowed to keep the overall report rendering. Empty when no
@@ -233,19 +226,18 @@ type HistoryResult struct {
 	Warnings []string `json:"warnings,omitempty" table:"-"`
 }
 
-// LockChange is the wire-level representation of one lock-file change for the
-// [HistoryResult.LockChangeDetails] field. It mirrors the fields of
-// [sources.LockChange] (and its
+// UpstreamCommitChange is the wire-level representation of one generated
+// upstream-commit TOML change. It mirrors [sources.UpstreamCommitChange] and its
 // embedded [sources.CommitMetadata]) that consumers of `azldev component
 // history` JSON output care about.
 //
-// The fields are copied explicitly in [populateLockMetrics] rather than
-// embedding [sources.LockChange] directly so that:
+// The fields are copied explicitly in [populateUpstreamCommitMetrics] rather
+// than embedding [sources.UpstreamCommitChange] directly so that:
 //   - the JSON contract for this command is owned by this package, and
 //   - dropping a field from the synthetic-history source type produces a
 //     compile error at the copy site instead of silently emptying the
 //     downstream changelog data.
-type LockChange struct {
+type UpstreamCommitChange struct {
 	Hash           string `json:"hash"`
 	Author         string `json:"author"`
 	AuthorEmail    string `json:"authorEmail"`
@@ -273,10 +265,6 @@ func ComponentHistory(env *azldev.Env, options *HistoryOptions) ([]HistoryResult
 	if err := validateSharedTomlMode(options.SharedTomlMode); err != nil {
 		return nil, err
 	}
-
-	// History is read-only; skip lock validation so stale or missing locks
-	// don't block reporting.
-	options.ComponentFilter.SkipLockValidation = true
 
 	resolver := components.NewResolver(env)
 
@@ -359,8 +347,8 @@ func ComponentHistory(env *azldev.Env, options *HistoryOptions) ([]HistoryResult
 		results = append(results, parmapRes.Value)
 	}
 
-	// LockChangeDetails is potentially the largest field in the payload
-	// (one entry per lock change per component, each with
+	// UpstreamCommitChangeDetails is potentially the largest field in the payload
+	// (one entry per upstream commit change per component, each with
 	// commit metadata); JSON consumers on -a runs at azurelinux scale would
 	// otherwise get multi-MB responses. The details exist for drilling into
 	// a single component to author a changelog, so keep them only when
@@ -369,7 +357,7 @@ func ComponentHistory(env *azldev.Env, options *HistoryOptions) ([]HistoryResult
 	// details (the same len()==1 predicate the card view keys off).
 	if len(results) != 1 {
 		for i := range results {
-			results[i].LockChangeDetails = nil
+			results[i].UpstreamCommitChangeDetails = nil
 		}
 	}
 

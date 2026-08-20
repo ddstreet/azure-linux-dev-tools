@@ -12,7 +12,6 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/git"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/parmap"
@@ -21,7 +20,6 @@ import (
 // historyContext holds resolved repo state shared across components.
 type historyContext struct {
 	repoRoot string
-	lockDir  string
 }
 
 // newHistoryContext opens the project repository once just to resolve the
@@ -46,7 +44,6 @@ func newHistoryContext(env *azldev.Env) (*historyContext, error) {
 
 	return &historyContext{
 		repoRoot: worktree.Filesystem.Root(),
-		lockDir:  cfg.Project.LockDir,
 	}, nil
 }
 
@@ -180,8 +177,7 @@ func collectUniqueTomlRelPathsFromStubs(repoRoot string, stubs []historyStub) []
 
 // buildHistoryResult assembles a single [HistoryResult] for a stub. The
 // stub already carries the precomputed customization items; this function
-// fills in the git-driven metrics (toml-commits via cache, lock-changes via
-// per-call repo).
+// fills in the git-driven metrics.
 func buildHistoryResult(
 	env *azldev.Env,
 	stub historyStub,
@@ -198,7 +194,7 @@ func buildHistoryResult(
 	}
 
 	populateTomlMetrics(stub.component, ctx, tomlSharing, tomlCache, sharedMode, explicit, &result)
-	populateLockMetrics(env, stub.component, ctx, &result)
+	populateUpstreamCommitMetrics(env, stub.component, ctx, &result)
 
 	return result
 }
@@ -257,8 +253,7 @@ func populateTomlMetrics(
 
 	if metrics.err != nil {
 		// A real `git log` failure was cached during precompute. Surface it
-		// rather than silently reporting zero commits (mirrors the lock-path
-		// warning behavior).
+		// rather than silently reporting zero commits.
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("counting TOML commits for %q failed; toml-commits left at zero: %v",
 				tomlRelPath, metrics.err))
@@ -270,17 +265,11 @@ func populateTomlMetrics(
 	result.LatestCommit = metrics.latest
 }
 
-// populateLockMetrics fills in LockChanges, LockChangeDetails,
-// and HasLock.
-// A missing lock file is "no data", not an error; a genuine read failure
-// (corrupt/unparseable lock) is surfaced via result.Warnings so a
-// tomlCommits/lockChanges of 0 can't be silently confused with a
-// real failure.
-//
-// LockChangeDetails is always populated here; the caller strips it
+// populateUpstreamCommitMetrics fills in the generated commit TOML history.
+// Details are always populated here; the caller strips them
 // when more than one component is reported. See [ComponentHistory] for the
 // rationale.
-func populateLockMetrics(
+func populateUpstreamCommitMetrics(
 	env *azldev.Env,
 	comp components.Component,
 	ctx *historyContext,
@@ -288,54 +277,26 @@ func populateLockMetrics(
 ) {
 	name := comp.GetName()
 
-	lockReader := env.LockReader()
-	if lockReader != nil {
-		lock, lockErr := lockReader.Get(name)
+	config := comp.GetConfig()
 
-		switch {
-		case lockErr == nil && lock != nil:
-			result.HasLock = true
-		case lockErr != nil:
-			// Distinguish a missing lock ("no data", expected) from a real
-			// read failure (corrupt/unparseable lock). Mirror the store's
-			// own not-found detection (Exists) since the wrapped fs error
-			// isn't reliably errors.Is(os.ErrNotExist)-comparable. Only a
-			// genuine failure earns a warning, so a lockChanges value of 0
-			// can't be silently confused with a load error.
-			exists, existsErr := lockReader.Exists(name)
-			switch {
-			case existsErr != nil:
-				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("reading lock file for %q: %v (existence check also failed: %v)",
-						name, lockErr, existsErr))
-			case exists:
-				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("reading lock file for %q: %v", name, lockErr))
-			}
-		}
+	upstreamCommitConfigFile := config.UpstreamCommitConfigFile()
+	if upstreamCommitConfigFile == nil || upstreamCommitConfigFile.SourcePath() == "" ||
+		config.Spec.UpstreamCommit == "" {
+		return
 	}
 
-	lockAbsPath, err := lockfile.LockPath(ctx.lockDir, name)
+	configPath := upstreamCommitConfigFile.SourcePath()
+
+	configRelPath, err := repoRelPath(ctx.repoRoot, configPath)
 	if err != nil {
-		// Invalid component name for path resolution: skip lock metrics
-		// rather than failing the whole report.
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("resolving lock path: %v", err))
+			fmt.Sprintf("upstream commit TOML %q is outside the git repository; changes skipped: %v",
+				configPath, err))
 
 		return
 	}
 
-	lockRelPath, err := repoRelPath(ctx.repoRoot, lockAbsPath)
-	if err != nil {
-		// Lock dir lives outside the repo: nothing to count.
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("lock file %q is outside the git repository; lock-changes skipped: %v",
-				lockAbsPath, err))
-
-		return
-	}
-
-	lockChanges, err := func() ([]sources.LockChange, error) {
+	changes, err := func() ([]sources.UpstreamCommitChange, error) {
 		// Open a fresh repo for this call -- go-git's *Repository is not
 		// safe for concurrent use. Opening is cheap (just reads .git/config).
 		repo, openErr := git.OpenProjectRepo(env.ProjectDir())
@@ -343,35 +304,36 @@ func populateLockMetrics(
 			return nil, fmt.Errorf("opening project repository:\n%w", openErr)
 		}
 
-		return sources.FindLockChanges(env.Context(), env, repo, ctx.repoRoot, lockRelPath)
+		return sources.FindUpstreamCommitChanges(
+			env.Context(), env, repo, ctx.repoRoot, configRelPath, name,
+		)
 	}()
 	if err != nil {
-		// A lock file with no committed history is NOT an error here --
-		// FindLockChanges returns (nil, nil) in that case. This
-		// branch only fires on real failures (git open, blob read, etc.).
 		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("computing lock changes for %q: %v", lockRelPath, err))
+			fmt.Sprintf("computing upstream commit changes for %q: %v", configRelPath, err))
 
 		return
 	}
 
-	result.LockChanges = len(lockChanges)
-	result.LockChangeDetails = toLockChanges(lockChanges)
+	result.UpstreamCommitChanges = len(changes)
+	result.UpstreamCommitChangeDetails = toUpstreamCommitChanges(changes)
 }
 
-// toLockChanges copies each [sources.LockChange] into the local [LockChange]
-// wire type by naming every field explicitly. Removing a field from
-// [sources.LockChange] or
+// toUpstreamCommitChanges copies each source change into the wire type by
+// naming every field explicitly. Removing a field from
+// [sources.UpstreamCommitChange] or
 // [sources.CommitMetadata] trips a compile error here, alerting us to a
 // quietly-shrunk changelog payload.
-func toLockChanges(changes []sources.LockChange) []LockChange {
+func toUpstreamCommitChanges(
+	changes []sources.UpstreamCommitChange,
+) []UpstreamCommitChange {
 	if len(changes) == 0 {
 		return nil
 	}
 
-	out := make([]LockChange, len(changes))
+	out := make([]UpstreamCommitChange, len(changes))
 	for i, change := range changes {
-		out[i] = LockChange{
+		out[i] = UpstreamCommitChange{
 			Hash:           change.Hash,
 			Author:         change.Author,
 			AuthorEmail:    change.AuthorEmail,

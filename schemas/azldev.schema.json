@@ -1057,9 +1057,7 @@
         },
         "lock-dir": {
           "type": "string",
-          "title": "Lock Directory",
-          "description": "Directory for per-component lock files",
-          "default": "locks"
+          "description": "Deprecated and ignored. Lock files are no longer used."
         },
         "default-distro": {
           "$ref": "#/$defs/DistroReference",

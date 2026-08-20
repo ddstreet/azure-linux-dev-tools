@@ -122,7 +122,7 @@ ensure it fits the component and repository conventions.
 - **Release mode:** `auto` is the default. Force `autorelease` or `static` only when
   auto-detection is wrong. Use `manual` only for a non-standard release tag, and verify
   the component increments its release itself.
-- **Generated state:** The lock matches the final component inputs, and rendered output
+- **Generated state:** The upstream commit config matches the final component inputs, and rendered output
   contains the intended changes without unrelated drift.
 - **Testing:** Changes that can affect RPM output were built and smoke-tested in a mock
   chroot. Organization, comment, or documentation-only metadata edits do not require a

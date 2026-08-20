@@ -54,7 +54,7 @@ const (
 // azldev regression and an upstream-branch drift easy to spot in CI logs.
 //
 // fullHistory controls clone depth. 'azldev component render' walks the
-// project repo's git log to count lock-file changes (used to
+// project repo's git log to count upstream-commit config changes (used to
 // determine the synthetic-commit count and the Release-tag bump); a shallow
 // (--depth=1) clone hides that history and produces a smaller bump than the
 // upstream rendered output recorded, so render idempotency tests must clone
@@ -162,7 +162,7 @@ echo "OK: working tree is clean after 'azldev %[3]s'"
 // TestAzureLinuxComponentUpdateIsIdempotent verifies that running
 // 'azldev component update -a' against an upstream microsoft/azurelinux
 // checkout at HEAD of [azureLinuxBranch] leaves no modifications in the
-// working tree. In other words, the lock files committed in the upstream
+// working tree. In other words, the generated upstream commit config in the upstream
 // branch are already fresh against the resolved upstream snapshots, and
 // 'update -a' is a no-op.
 //

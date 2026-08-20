@@ -27,7 +27,7 @@ All config files share the same schema — there is no distinction between a "ro
 The `includes` field lists glob patterns for additional config files to load and merge:
 
 ```toml
-includes = ["distro/distro.toml", "base/project.toml"]
+includes = ["distro/distro.toml", "base/upstream-commits/*.toml", "base/project.toml"]
 ```
 
 | Field | Type | Description |
@@ -38,12 +38,16 @@ Glob patterns that match no files are silently ignored. Literal filenames (no wi
 
 Includes are resolved recursively — included files can themselves declare further includes. For a detailed explanation of load order and merge semantics, see [Configuration System](../../explanation/config-system.md).
 
+Generated upstream-commit files must be included before any component-specific
+TOML configuration. Later component definitions provide the remaining
+`spec` fields and may explicitly override a generated pin.
+
 ## Minimal Example
 
 A minimal root config file that includes distro definitions and a project:
 
 ```toml
-includes = ["distro/distro.toml", "base/project.toml"]
+includes = ["distro/distro.toml", "base/upstream-commits/*.toml", "base/project.toml"]
 ```
 
 A project-level config file with its own includes:

@@ -112,62 +112,59 @@ func TestCollectCustomizationsEmitsEveryKind(t *testing.T) {
 	}
 }
 
-// TestLockChangeDTOMirrorsSource guards the direction the explicit field-by-field
-// copy in [toLockChanges] cannot: a NEW field added to [sources.LockChange] /
+// TestUpstreamCommitChangeDTOMirrorsSource guards the explicit field copy.
 // [sources.CommitMetadata] would compile fine
 // but silently never reach JSON consumers. This asserts the local DTO carries
 // a field of the same type for every exported source field (matched by name),
 // so a field addition OR a type change (e.g. int64->int32) trips the test.
-func TestLockChangeDTOMirrorsSource(t *testing.T) {
+func TestUpstreamCommitChangeDTOMirrorsSource(t *testing.T) {
 	t.Parallel()
 
-	dtoFields := exportedFieldTypes(reflect.TypeFor[LockChange]())
+	dtoFields := exportedFieldTypes(reflect.TypeFor[UpstreamCommitChange]())
 
-	for name, srcType := range exportedFieldTypes(reflect.TypeFor[sources.LockChange]()) {
+	for name, srcType := range exportedFieldTypes(reflect.TypeFor[sources.UpstreamCommitChange]()) {
 		dtoType, ok := dtoFields[name]
 		if !assert.Truef(t, ok,
-			"sources.LockChange field %q has no counterpart in the local "+
-				"LockChange DTO; add it (and to toLockChanges) so it "+
+			"sources.UpstreamCommitChange field %q has no counterpart in the local "+
+				"UpstreamCommitChange DTO; add it so it "+
 				"reaches JSON consumers, or it is silently dropped.", name) {
 			continue
 		}
 
 		assert.Equalf(t, srcType, dtoType,
-			"LockChange DTO field %q has type %s but sources.LockChange "+
-				"has %s; the explicit copy in toLockChanges would silently "+
+			"UpstreamCommitChange DTO field %q has type %s but source "+
+				"has %s; the explicit copy would silently "+
 				"narrow or mistype the value.", name, dtoType, srcType)
 	}
 }
 
-// TestRenderCardViewLockChangeHint pins the single-component
-// card omits the per-commit LockChangeDetails (to stay scannable) but
-// must point the user at -O json whenever lock changes exist, so the
-// details aren't a silent dead end.
-func TestRenderCardViewLockChangeHint(t *testing.T) {
+// TestRenderCardViewUpstreamCommitChangeHint pins the single-component
+// card behavior: details stay out of the scannable view, but JSON is linked.
+func TestRenderCardViewUpstreamCommitChangeHint(t *testing.T) {
 	t.Parallel()
 
 	var withChanges strings.Builder
 
 	renderCardView(&withChanges, HistoryResult{
-		Name:           "curl",
-		TomlPath:       "azldev.toml",
-		TomlCommits:    3,
-		Customizations: 2,
-		LockChanges:    2,
+		Name:                  "curl",
+		TomlPath:              "azldev.toml",
+		TomlCommits:           3,
+		Customizations:        2,
+		UpstreamCommitChanges: 2,
 	})
 
 	out := withChanges.String()
 	assert.Contains(t, out, "Component: curl")
-	assert.Contains(t, out, "Lock changes:   2")
+	assert.Contains(t, out, "Commit changes: 2")
 	assert.Contains(t, out, "-O json",
-		"card should point at -O json when lock changes exist")
+		"card should point at -O json when commit changes exist")
 
 	var noChanges strings.Builder
 
 	renderCardView(&noChanges, HistoryResult{Name: "bash"})
 
 	assert.NotContains(t, noChanges.String(), "-O json",
-		"no lock changes means no -O json hint")
+		"no commit changes means no -O json hint")
 }
 
 // exportedFieldTypes returns the exported fields of a struct type keyed by

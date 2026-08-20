@@ -299,11 +299,9 @@ func (d *noOpDownloader) ExtractSourcesFromRepo(
 
 // --- ResolveIdentity always resolves from upstream ---
 
-// TestFedoraProvider_ResolveIdentity_IgnoresLockedData verifies that
-// ResolveIdentity does not short-circuit on locked data — it always
-// resolves from upstream. Callers that want the cached locked commit should
-// read ComponentLockData.UpstreamCommit directly.
-func TestFedoraProvider_ResolveIdentity_IgnoresLockedData(t *testing.T) {
+// TestFedoraProvider_ResolveIdentity_WithoutConfigPin verifies that
+// ResolveIdentity queries upstream when the component has no configured commit.
+func TestFedoraProvider_ResolveIdentity_WithoutConfigPin(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockGitProvider := git_test.NewMockGitProvider(ctrl)
 
@@ -325,12 +323,8 @@ func TestFedoraProvider_ResolveIdentity_IgnoresLockedData(t *testing.T) {
 			SourceType: projectconfig.SpecSourceTypeUpstream,
 			// No UpstreamCommit pin → resolves via clone + snapshot/HEAD.
 		},
-		Locked: &projectconfig.ComponentLockData{
-			UpstreamCommit: "stale-locked-commit",
-		},
 	})
 
-	// Expects clone even though Locked data is present.
 	mockGitProvider.EXPECT().
 		Clone(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil)
@@ -340,13 +334,12 @@ func TestFedoraProvider_ResolveIdentity_IgnoresLockedData(t *testing.T) {
 
 	identity, resolveErr := provider.ResolveIdentity(t.Context(), comp)
 	require.NoError(t, resolveErr)
-	assert.Equal(t, headCommit, identity,
-		"should resolve from upstream, ignoring locked data")
+	assert.Equal(t, headCommit, identity)
 }
 
 // TestFedoraProvider_ResolveIdentity_UsesConfigPin verifies that
 // when Spec.UpstreamCommit is set, ResolveIdentity returns it
-// directly (even if Locked data is also present).
+// directly.
 func TestFedoraProvider_ResolveIdentity_UsesConfigPin(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockGitProvider := git_test.NewMockGitProvider(ctrl)
@@ -366,9 +359,6 @@ func TestFedoraProvider_ResolveIdentity_UsesConfigPin(t *testing.T) {
 		Spec: projectconfig.SpecSource{
 			SourceType:     projectconfig.SpecSourceTypeUpstream,
 			UpstreamCommit: "config-pinned-commit",
-		},
-		Locked: &projectconfig.ComponentLockData{
-			UpstreamCommit: "locked-commit-ignored",
 		},
 	})
 

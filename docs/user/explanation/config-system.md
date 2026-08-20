@@ -82,7 +82,15 @@ When multiple files define the same top-level section, azldev applies section-sp
 
 ### Components
 
-Component definitions are merged additively. If the same component name (e.g., `curl`) appears in multiple files, later files' non-empty fields override earlier ones. This allows splitting a component definition across files — for example, defining the component's general properties in one file and overriding specific details in another.
+Component definitions are merged additively. If the same component name (e.g.,
+`curl`) appears in multiple files, later files' non-empty fields override
+earlier ones. This allows splitting a component definition across files, such
+as loading a generated upstream-commit file first and then loading the
+component-specific definition. Generated upstream-commit files contain only
+`spec.upstream-commit`; they must come first so the component-specific file
+supplies the source type and may explicitly override the generated pin.
+Individual files may therefore contain partial component definitions.
+Component validation runs after all included TOML files have been merged.
 
 > **Note:** Slice fields (like `overlays`) are **appended**, not replaced, following the same merge behavior used by component configuration inheritance.
 

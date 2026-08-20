@@ -108,14 +108,31 @@ func (f ConfigFile) Validate() error {
 		return err
 	}
 
-	// Per-component snapshot timestamps are not allowed. Components inherit
-	// the snapshot from the distro/group default-component-config or the
-	// project's default-distro. Per-component snapshots would create
-	// non-deterministic builds that the lock file cannot reliably track.
-	// Use an explicit 'upstream-commit' pin instead.
+	if err := validateComponentConfigs(f.Components); err != nil {
+		return err
+	}
 
-	// Validate overlay configurations for each component.
-	for componentName, component := range f.Components {
+	if err := validateTestSuites(f.TestSuites); err != nil {
+		return err
+	}
+
+	if err := validateTestDefinitions(f.Tests); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateNonComponentFields validates fields that do not support additive
+// merging. Components are validated after all config files have been merged.
+func (f ConfigFile) validateNonComponentFields() error {
+	f.Components = nil
+
+	return f.Validate()
+}
+
+func validateComponentConfigs(components map[string]ComponentConfig) error {
+	for componentName, component := range components {
 		for i, overlay := range component.Overlays {
 			err := overlay.Validate()
 			if err != nil {
@@ -140,14 +157,6 @@ func (f ConfigFile) Validate() error {
 					"or use 'upstream-commit' to pin a specific commit",
 				componentName)
 		}
-	}
-
-	if err := validateTestSuites(f.TestSuites); err != nil {
-		return err
-	}
-
-	if err := validateTestDefinitions(f.Tests); err != nil {
-		return err
 	}
 
 	return nil

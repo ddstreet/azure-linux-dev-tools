@@ -22,7 +22,7 @@ type ProjectConfig struct {
 	// Definitions of component groups.
 	ComponentGroups map[string]ComponentGroupConfig `toml:"component-groups,omitempty" json:"componentGroups,omitempty" jsonschema:"title=Component Groups,description=Mapping of component group names to configurations"`
 	// Definitions of components.
-	Components map[string]ComponentConfig `toml:"components,omitempty" json:"components,omitempty" jsonschema:"title=Components,description=Mapping of component names to configurations"`
+	Components map[string]ComponentConfig `toml:"components,omitempty" json:"components,omitempty" validate:"dive" jsonschema:"title=Components,description=Mapping of component names to configurations"`
 	// Definitions of images.
 	Images map[string]ImageConfig `toml:"images,omitempty" json:"images,omitempty" jsonschema:"title=Images,description=Mapping of image names to configurations"`
 	// Definitions of distros.
@@ -86,6 +86,10 @@ func (cfg *ProjectConfig) Validate() error {
 	}
 
 	if err := validateComponentGroupMembership(cfg.ComponentGroups, cfg.Components); err != nil {
+		return err
+	}
+
+	if err := validateComponentConfigs(cfg.Components); err != nil {
 		return err
 	}
 
@@ -356,7 +360,6 @@ const (
 	DefaultLogDir           = "build/logs"
 	DefaultWorkDir          = "build/work"
 	DefaultOutputDir        = "out"
-	DefaultLockDir          = "locks"
 	DefaultRenderedSpecsDir = "specs"
 )
 
@@ -375,8 +378,9 @@ type ProjectInfo struct {
 	// Path to the output directory for rendered specs (component render).
 	RenderedSpecsDir string `toml:"rendered-specs-dir,omitempty" json:"renderedSpecsDir,omitempty" jsonschema:"title=Rendered Specs Directory,description=Output directory for rendered specs,example=SPECS"`
 
-	// Path to the directory for per-component lock files.
-	LockDir string `toml:"lock-dir,omitempty" json:"lockDir,omitempty" jsonschema:"title=Lock Directory,description=Directory for per-component lock files,default=locks"`
+	// DeprecatedLockDir accepts the legacy [project.lock-dir] field for backward
+	// compatibility. Lock files are no longer used, so this value is ignored.
+	DeprecatedLockDir string `toml:"lock-dir,omitempty" json:"-" jsonschema:"deprecated=true,description=Deprecated and ignored. Lock files are no longer used."`
 
 	// Default-selected distro. May be overridden at runtime.
 	DefaultDistro DistroReference `toml:"default-distro,omitempty" json:"defaultDistro,omitempty" jsonschema:"title=Default Distro,description=Default selected distro reference"`
@@ -410,7 +414,6 @@ func (p *ProjectInfo) WithAbsolutePaths(referenceDir string) *ProjectInfo {
 	result.WorkDir = makeAbsolute(referenceDir, result.WorkDir)
 	result.OutputDir = makeAbsolute(referenceDir, result.OutputDir)
 	result.RenderedSpecsDir = makeAbsolute(referenceDir, result.RenderedSpecsDir)
-	result.LockDir = makeAbsolute(referenceDir, result.LockDir)
 
 	return result
 }
@@ -426,7 +429,6 @@ func (p *ProjectInfo) ApplyProjectDefaults(projectDir string) {
 	setIfEmpty(&p.LogDir, projectDir, DefaultLogDir)
 	setIfEmpty(&p.WorkDir, projectDir, DefaultWorkDir)
 	setIfEmpty(&p.OutputDir, projectDir, DefaultOutputDir)
-	setIfEmpty(&p.LockDir, projectDir, DefaultLockDir)
 	setIfEmpty(&p.RenderedSpecsDir, projectDir, DefaultRenderedSpecsDir)
 }
 

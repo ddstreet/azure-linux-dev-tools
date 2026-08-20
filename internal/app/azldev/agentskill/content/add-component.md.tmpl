@@ -25,7 +25,7 @@ dist-git often fail bot detection):
    segment the configuration into included files. Once the initial pass is done,
    ensure the component is in the right place and remove the root entry.
 
-2. Create the initial lock so source resolution is pinned before inspection:
+2. Generate the initial upstream commit config so source resolution is pinned before inspection:
 
     ```sh
     azldev comp update -p <name>
@@ -70,11 +70,11 @@ points when adding a component:
 
 ## Validate
 
-The initial lock pins the upstream revision you inspected. Refresh it after the
+The generated config pins the upstream revision you inspected. Refresh it after the
 component inputs settle, then validate:
 
 ```sh
-azldev comp update -p <name>          # resolve the upstream commit and write the lock
+azldev comp update -p <name>          # resolve and write the generated upstream commit config
 azldev comp render -p <name>          # apply overlays and write the rendered spec
 azldev comp diff-sources -p <name>    # see exactly what the overlays change
 azldev comp build -p <name>           # build the RPMs
@@ -84,7 +84,7 @@ Inspect the rendered spec under `{{ .RenderedSpecsDir }}/`. A new component alwa
 smoke test — see the `azldev-build-component` and `azldev-mock` skills.
 
 After all component inputs are final, run `azldev comp update -p <name>` again and
-re-render. Stage the component definition and sources, `{{ .LockDir }}/<name>.lock`, and
+re-render. Stage the component definition and sources, `{{ .UpstreamCommitsDir }}/<name>.toml`, and
 the rendered output before committing. Then re-render, stage
 `{{ .RenderedSpecsDir }}/<first-char>/<name>/`, and amend the commit so `%changelog` and
 `Release:` reflect it. See the `azldev-update-component` skill for the complete

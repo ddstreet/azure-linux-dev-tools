@@ -13,7 +13,6 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/testctx"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileperms"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
@@ -158,7 +157,6 @@ func constructProjectConfig(testMockConfigPath string) *projectconfig.ProjectCon
 	config.Project.WorkDir = "/work"
 	config.Project.LogDir = "/logs"
 	config.Project.OutputDir = "/output"
-	config.Project.LockDir = "/project/locks"
 	config.Project.DefaultDistro.Name = "test-distro"
 	config.Project.DefaultDistro.Version = "1.0"
 
@@ -189,43 +187,20 @@ func (e *TestEnv) OSEnv() opctx.OSEnv {
 	return e.TestOSEnv
 }
 
-// WriteLock creates a lock file on the test filesystem for the given component.
-// Uses the same lock directory layout as the production [lockfile.Store].
-func (e *TestEnv) WriteLock(t *testing.T, name string, lock *lockfile.ComponentLock) {
-	t.Helper()
-
-	store := lockfile.NewStore(e.TestFS, "/project/"+projectconfig.DefaultLockDir)
-	require.NoError(t, store.Save(name, lock))
-}
-
-// TestUpstreamCommit is the default commit hash used by [TestEnv.WriteDefaultLock]
-// and [TestEnv.AddUpstreamComponent].
-const TestUpstreamCommit = "test-upstream-commit-aabb1122"
-
-// WriteDefaultLock writes a minimal valid lock file for the named component.
-// Use this when a test adds a component inline (with custom config) and just
-// needs lock validation to pass.
-func (e *TestEnv) WriteDefaultLock(t *testing.T, name string) {
-	t.Helper()
-
-	lock := lockfile.New()
-	lock.UpstreamCommit = TestUpstreamCommit
-	e.WriteLock(t, name, lock)
-}
+// TestUpstreamCommit is the default commit used by [TestEnv.AddUpstreamComponent].
+const TestUpstreamCommit = "aabb1122"
 
 // AddUpstreamComponent registers an upstream component in the test config and
-// writes a minimal lock file so lock validation passes. Use this instead of
-// setting env.Config.Components directly when the test doesn't need to
-// customize the lock data.
+// supplies a minimal configured commit. Use this instead of setting
+// env.Config.Components directly when the test does not need custom config.
 func (e *TestEnv) AddUpstreamComponent(t *testing.T, name string) {
 	t.Helper()
 
 	e.Config.Components[name] = projectconfig.ComponentConfig{
 		Name: name,
 		Spec: projectconfig.SpecSource{
-			SourceType: projectconfig.SpecSourceTypeUpstream,
+			SourceType:     projectconfig.SpecSourceTypeUpstream,
+			UpstreamCommit: TestUpstreamCommit,
 		},
 	}
-
-	e.WriteDefaultLock(t, name)
 }

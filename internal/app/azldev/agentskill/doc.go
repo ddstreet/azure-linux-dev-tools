@@ -55,7 +55,7 @@
 //   - Version           — the azldev version stamped into every file.
 //   - TopLevelCommands  — generated from the Cobra command tree, so the overview skill's
 //     command list never goes stale.
-//   - Bindings          — repo-specific paths (LockDir, RenderedSpecsDir, WorkDir) read from
+//   - Bindings          — repo-specific paths (UpstreamCommitsDir, RenderedSpecsDir, WorkDir) read from
 //     the target azldev.toml, degrading to azldev's defaults when no config is present.
 //
 // # Outputs (three sinks, one registry)

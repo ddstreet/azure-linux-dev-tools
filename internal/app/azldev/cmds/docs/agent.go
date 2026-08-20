@@ -81,11 +81,10 @@ read-only 'docs-agent-show' MCP tool for the full, always-current skill. Pass
 --full to inline the complete skill instead, for environments without the azldev
 MCP server.
 
-Directory paths in the emitted content (such as the lock and rendered-spec
-directories) are resolved from the loaded azldev.toml, falling back to azldev's
-built-in defaults when no configuration is found. The bindings reflect the project
-azldev runs in, so pair --output-dir with -C pointing at the target repository when
-scaffolding a different repo.`,
+Directory paths in the emitted content use the generated upstream-commit config
+default and the rendered-spec directory resolved from azldev.toml. The bindings
+reflect the project azldev runs in, so pair --output-dir with -C pointing at the
+target repository when scaffolding a different repo.`,
 		Example: `  # Write agent files into the current repository
   azldev docs agent install
 
@@ -330,9 +329,9 @@ func agentSkillParams(env *azldev.Env, rootCmd *cobra.Command) agentskill.Params
 // with '-C' pointing at that repository so the emitted paths match it.
 func resolveBindings(env *azldev.Env) agentskill.Bindings {
 	bindings := agentskill.Bindings{
-		LockDir:          projectconfig.DefaultLockDir,
-		RenderedSpecsDir: projectconfig.DefaultRenderedSpecsDir,
-		WorkDir:          projectconfig.DefaultWorkDir,
+		UpstreamCommitsDir: "base/upstream-commits",
+		RenderedSpecsDir:   projectconfig.DefaultRenderedSpecsDir,
+		WorkDir:            projectconfig.DefaultWorkDir,
 	}
 
 	if env == nil || env.Config() == nil {
@@ -341,10 +340,6 @@ func resolveBindings(env *azldev.Env) agentskill.Bindings {
 
 	cfg := env.Config()
 	projectDir := env.ProjectDir()
-
-	if dir := repoRelativeDir(projectDir, cfg.Project.LockDir); dir != "" {
-		bindings.LockDir = dir
-	}
 
 	if dir := repoRelativeDir(projectDir, cfg.Project.RenderedSpecsDir); dir != "" {
 		bindings.RenderedSpecsDir = dir

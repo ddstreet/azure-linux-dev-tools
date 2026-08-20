@@ -89,6 +89,31 @@ The value must be a hex string between 7 and 40 characters (a short or full git 
 
 > **Note:** Commit-pinning is intended for temporary use. Once the desired change lands in a tagged upstream release, switch back to version-based pinning or the default snapshot to keep the component aligned with the upstream distro.
 
+`azldev component update` resolves commits from the configured snapshot and writes one
+normal component config file per upstream component under `base/upstream-commits/` by
+default. Include those generated files in the project configuration so all commands use
+the resolved commits. The generated files must be included before the
+component-specific TOML configuration:
+
+```toml
+includes = [
+    "base/upstream-commits/*.toml",
+    "base/comps/**/*.toml",
+]
+```
+
+Each generated file supplies only the component's `spec.upstream-commit`. The
+later component-specific definition supplies `spec.type` and all other
+configuration, and may explicitly override the generated commit. Use
+`--upstream-commits-dir` to choose a different directory, and update the include
+pattern to match.
+
+The command parses and merges all included TOML before checking each selected
+component's effective `spec.type`. It contacts the upstream provider and
+creates or updates a generated pin only when that type is `upstream`. For any
+other source type, it removes an existing generated pin for the selected
+component.
+
 ### Local Specs
 
 For components that originate from your project (not imported from upstream), use a local spec:

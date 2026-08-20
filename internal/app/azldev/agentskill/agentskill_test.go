@@ -25,9 +25,9 @@ func testParams() agentskill.Params {
 			{Name: "docs", Short: "Generate documentation"},
 		},
 		Bindings: agentskill.Bindings{
-			LockDir:          "locks",
-			RenderedSpecsDir: "specs",
-			WorkDir:          "build/work",
+			UpstreamCommitsDir: "base/upstream-commits",
+			RenderedSpecsDir:   "specs",
+			WorkDir:            "build/work",
 		},
 	}
 }
@@ -99,15 +99,15 @@ func TestOverlayMetadataSkillDocument(t *testing.T) {
 func TestSkillDocumentUsesBindings(t *testing.T) {
 	params := testParams()
 	params.Bindings = agentskill.Bindings{
-		LockDir:          "build/locks",
-		RenderedSpecsDir: "build/specs",
+		UpstreamCommitsDir: "build/upstream-commits",
+		RenderedSpecsDir:   "build/specs",
 	}
 
 	doc, err := agentskill.SkillDocument("azldev-remove-component", params)
 	require.NoError(t, err)
 
 	// The resolved binding values, not azldev's defaults, appear in the rendered body.
-	assert.Contains(t, doc, "build/locks/<name>.lock")
+	assert.Contains(t, doc, "build/upstream-commits/<name>.toml")
 	assert.Contains(t, doc, "build/specs/")
 }
 

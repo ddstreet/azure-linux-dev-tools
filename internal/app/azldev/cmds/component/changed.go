@@ -16,8 +16,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
+	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/git"
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -30,6 +31,8 @@ type ChangedComponentOptions struct {
 	To string
 	// IncludeUnchanged includes unchanged components in the output.
 	IncludeUnchanged bool
+	// UpstreamCommitsDir contains generated component commit TOMLs.
+	UpstreamCommitsDir string
 }
 
 func changedOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
@@ -39,22 +42,22 @@ func changedOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
 // NewChangedCmd constructs a [cobra.Command] for the "component changed" CLI subcommand.
 func NewChangedCmd() *cobra.Command {
 	options := &ChangedComponentOptions{}
+	options.UpstreamCommitsDir = defaultUpstreamCommitsDir
 
 	cmd := &cobra.Command{
 		Use:   "changed",
 		Short: "Detect which components changed between two git refs",
-		Long: `Compare component lock files and rendered sources between two git refs to
+		Long: `Compare generated upstream-commit TOMLs and rendered sources between two git refs to
 determine which components changed. For each component, reports whether its
 resolved upstream commit changed and whether its rendered sources file changed.
 
 This is useful for CI/CD pipelines to determine which components need to be
 rebuilt or have their lookaside tarballs re-uploaded after a PR merge.
 
-Note: component selection and directory paths (lock-dir, rendered-specs-dir)
+Note: component selection and directory paths
 are resolved from the current checkout's configuration, not from the compared
 refs. For accurate results, run this command from a checkout that matches the
---to ref (e.g., after merging a PR). Components not in the current config are
-detected via lock file presence in the compared refs when using -a.`,
+--to ref (e.g., after merging a PR).`,
 		Example: `  # Show changed components between a branch and HEAD
   azldev component changed --from main -a
 
@@ -80,12 +83,11 @@ detected via lock file presence in the compared refs when using -a.`,
 	cmd.Flags().StringVar(&options.To, "to", "HEAD", "Git ref to compare to")
 	cmd.Flags().BoolVar(&options.IncludeUnchanged, "include-unchanged", false,
 		"Include unchanged components in output (only applies to broad -a scans; explicit selections always show status)")
+	cmd.Flags().StringVar(&options.UpstreamCommitsDir, "upstream-commits-dir",
+		defaultUpstreamCommitsDir, "directory containing generated upstream-commit TOML files")
+	_ = cmd.MarkFlagDirname("upstream-commits-dir")
 
 	_ = cmd.MarkFlagRequired("from")
-
-	// Hide inherited flag -- this command always skips lock validation since
-	// it inspects historical locks at arbitrary refs.
-	_ = cmd.Flags().MarkHidden("skip-lock-validation")
 
 	azldev.ExportAsReadOnlyMCPTool(cmd)
 
@@ -107,15 +109,11 @@ const (
 	changeTypeDeleted   = "deleted"
 )
 
-// ChangedComponents compares component lock files and rendered sources between
+// ChangedComponents compares component commit TOMLs and rendered sources between
 // two git refs to determine which changed.
 func ChangedComponents(
 	env *azldev.Env, options *ChangedComponentOptions,
 ) ([]ChangedResult, error) {
-	// Changed compares lock files between git refs — skip validation since
-	// the current working-tree locks may legitimately be stale.
-	options.ComponentFilter.SkipLockValidation = true
-
 	resolver := components.NewResolver(env)
 
 	comps, err := resolver.FindComponents(&options.ComponentFilter)
@@ -138,18 +136,16 @@ func ChangedComponents(
 		return nil, fmt.Errorf("resolving --to ref %#q:\n%w", options.To, err)
 	}
 
-	// Batch-read all locks at both refs.
-	fromLocks, err := lockfile.ReadAllAtCommit(ctx.repo, fromHash, ctx.lockRelDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading locks at --from:\n%w", err)
+	commitDir := options.UpstreamCommitsDir
+	if !filepath.IsAbs(commitDir) {
+		commitDir = filepath.Join(env.ProjectDir(), commitDir)
 	}
 
-	toLocks, err := lockfile.ReadAllAtCommit(ctx.repo, toHash, ctx.lockRelDir)
+	commitRelDir, err := repoRelPath(ctx.repoRoot, commitDir)
 	if err != nil {
-		return nil, fmt.Errorf("reading locks at --to:\n%w", err)
+		return nil, fmt.Errorf("resolving upstream commit TOML directory:\n%w", err)
 	}
 
-	// Resolve trees for sources comparison (raw file reads).
 	fromTree, err := resolveTree(ctx.repo, fromHash)
 	if err != nil {
 		return nil, fmt.Errorf("resolving tree for --from:\n%w", err)
@@ -160,8 +156,18 @@ func ChangedComponents(
 		return nil, fmt.Errorf("resolving tree for --to:\n%w", err)
 	}
 
+	fromCommits, err := readUpstreamCommitsAtTree(fromTree, commitRelDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading upstream commits at --from:\n%w", err)
+	}
+
+	toCommits, err := readUpstreamCommitsAtTree(toTree, commitRelDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading upstream commits at --to:\n%w", err)
+	}
+
 	results, err := buildResults(
-		comps, fromLocks, toLocks, ctx, fromTree, toTree,
+		comps, fromCommits, toCommits, ctx, fromTree, toTree,
 		options.IncludeUnchanged, options.ComponentFilter.IncludeAllComponents,
 	)
 	if err != nil {
@@ -175,7 +181,6 @@ func ChangedComponents(
 type changedContext struct {
 	repo             *gogit.Repository
 	repoRoot         string
-	lockRelDir       string
 	renderedSpecsDir string
 }
 
@@ -193,15 +198,9 @@ func newChangedContext(env *azldev.Env) (*changedContext, error) {
 
 	repoRoot := worktree.Filesystem.Root()
 
-	lockRelDir, err := repoRelPath(repoRoot, env.Config().Project.LockDir)
-	if err != nil {
-		return nil, fmt.Errorf("computing repo-relative lock dir:\n%w", err)
-	}
-
 	return &changedContext{
 		repo:             repo,
 		repoRoot:         repoRoot,
-		lockRelDir:       lockRelDir,
 		renderedSpecsDir: env.Config().Project.RenderedSpecsDir,
 	}, nil
 }
@@ -211,13 +210,13 @@ func newChangedContext(env *azldev.Env) (*changedContext, error) {
 // semantics -- see [buildResults] and [buildNonConfigResults].
 type classifyOpts struct {
 	// remapDeleted converts "deleted" to "changed". This matters for
-	// config components: a missing lock file means the component needs its
-	// lock regenerated (e.g., after a reset or manual deletion), but the
+	// config components: a missing commit TOML means the component needs its
+	// generated config restored, but the
 	// component itself still exists in the project config. Reporting
 	// "deleted" would be misleading -- it's a "changed" component that
-	// needs a rebuild. For non-config components (only known from lock
-	// files), a missing lock genuinely means the component was removed
-	// from the project, so "deleted" is correct.
+	// needs a rebuild. For non-config components (only known from generated
+	// commit TOMLs), a missing TOML genuinely means the component was
+	// removed from the project, so "deleted" is correct.
 	remapDeleted bool
 	// includeUnchanged keeps unchanged components in the output.
 	includeUnchanged bool
@@ -227,12 +226,12 @@ type classifyOpts struct {
 // sources file. Returns the result and whether it should be included in output.
 func classifyAndCompareSources(
 	name string,
-	fromLocks, toLocks map[string]lockfile.ComponentLock,
+	fromCommits, toCommits map[string]string,
 	ctx *changedContext,
 	fromTree, toTree *object.Tree,
 	opts classifyOpts,
 ) (ChangedResult, bool, error) {
-	result := classifyComponent(name, fromLocks, toLocks)
+	result := classifyComponent(name, fromCommits, toCommits)
 
 	if opts.remapDeleted && result.ChangeType == changeTypeDeleted {
 		result.ChangeType = changeTypeChanged
@@ -257,7 +256,7 @@ func classifyAndCompareSources(
 // buildResults compares all components and detects deletions.
 func buildResults(
 	comps *components.ComponentSet,
-	fromLocks, toLocks map[string]lockfile.ComponentLock,
+	fromCommits, toCommits map[string]string,
 	ctx *changedContext,
 	fromTree, toTree *object.Tree,
 	includeUnchanged, includeAllComponents bool,
@@ -265,8 +264,8 @@ func buildResults(
 	configNames := make(map[string]bool, comps.Len())
 	results := make([]ChangedResult, 0, comps.Len())
 
-	// Config components: remap deleted->changed (lock missing doesn't mean
-	// component is gone, just that the lock needs regeneration). Always
+	// Config components: remap deleted->changed (generated commit TOML missing
+	// doesn't mean the component is gone, just that the file needs regeneration). Always
 	// show when explicitly selected (-p, -g, -s); only filter unchanged
 	// in broad scans (-a).
 	opts := classifyOpts{
@@ -279,7 +278,7 @@ func buildResults(
 		configNames[name] = true
 
 		result, include, err := classifyAndCompareSources(
-			name, fromLocks, toLocks, ctx, fromTree, toTree, opts,
+			name, fromCommits, toCommits, ctx, fromTree, toTree, opts,
 		)
 		if err != nil {
 			return nil, err
@@ -291,7 +290,7 @@ func buildResults(
 	}
 
 	// Skip non-config component detection for filtered runs (-p, -g, -s,
-	// positional args) -- only check historical locks when scanning all
+	// positional args) -- only check historical commit TOMLs when scanning all
 	// components (-a).
 	if !includeAllComponents {
 		// Sort for deterministic output across runs.
@@ -303,7 +302,7 @@ func buildResults(
 	}
 
 	nonConfigResults, err := buildNonConfigResults(
-		fromLocks, toLocks, configNames, ctx, fromTree, toTree, includeUnchanged,
+		fromCommits, toCommits, configNames, ctx, fromTree, toTree, includeUnchanged,
 	)
 	if err != nil {
 		return nil, err
@@ -322,7 +321,7 @@ func buildResults(
 // buildNonConfigResults detects components not in the current config that
 // changed between refs -- deleted, added, or modified historical components.
 func buildNonConfigResults(
-	fromLocks, toLocks map[string]lockfile.ComponentLock,
+	fromCommits, toCommits map[string]string,
 	configNames map[string]bool,
 	ctx *changedContext,
 	fromTree, toTree *object.Tree,
@@ -330,13 +329,13 @@ func buildNonConfigResults(
 ) ([]ChangedResult, error) {
 	nonConfigNames := make(map[string]bool)
 
-	for name := range fromLocks {
+	for name := range fromCommits {
 		if !configNames[name] {
 			nonConfigNames[name] = true
 		}
 	}
 
-	for name := range toLocks {
+	for name := range toCommits {
 		if !configNames[name] {
 			nonConfigNames[name] = true
 		}
@@ -350,7 +349,7 @@ func buildNonConfigResults(
 	sort.Strings(sortedNames)
 
 	// Non-config components: keep deleted as-is (genuinely removed from
-	// the project, not just a missing lock for an existing component).
+	// the project, not just a missing generated commit TOML for an existing component).
 	opts := classifyOpts{
 		remapDeleted:     false,
 		includeUnchanged: includeUnchanged,
@@ -360,7 +359,7 @@ func buildNonConfigResults(
 
 	for _, name := range sortedNames {
 		result, include, err := classifyAndCompareSources(
-			name, fromLocks, toLocks, ctx, fromTree, toTree, opts,
+			name, fromCommits, toCommits, ctx, fromTree, toTree, opts,
 		)
 		if err != nil {
 			return nil, err
@@ -375,18 +374,18 @@ func buildNonConfigResults(
 }
 
 // classifyComponent determines the change type for a single component by
-// comparing its presence and upstream commit in the from/to lock maps.
+// comparing its presence and upstream commit in the from/to maps.
 func classifyComponent(
 	name string,
-	fromLocks, toLocks map[string]lockfile.ComponentLock,
+	fromCommits, toCommits map[string]string,
 ) ChangedResult {
 	result := ChangedResult{
 		Component:  name,
 		ChangeType: changeTypeUnchanged,
 	}
 
-	fromLock, inFrom := fromLocks[name]
-	toLock, inTo := toLocks[name]
+	fromCommit, inFrom := fromCommits[name]
+	toCommit, inTo := toCommits[name]
 
 	switch {
 	case !inFrom && !inTo:
@@ -396,12 +395,59 @@ func classifyComponent(
 	case !inTo:
 		result.ChangeType = changeTypeDeleted
 	default:
-		if fromLock.UpstreamCommit != toLock.UpstreamCommit {
+		if fromCommit != toCommit {
 			result.ChangeType = changeTypeChanged
 		}
 	}
 
 	return result
+}
+
+func readUpstreamCommitsAtTree(
+	tree *object.Tree,
+	configRelDir string,
+) (map[string]string, error) {
+	configTree, err := tree.Tree(configRelDir)
+	if err != nil {
+		if isFileNotFound(err) {
+			return map[string]string{}, nil
+		}
+
+		return nil, fmt.Errorf("reading upstream commit TOML directory %#q:\n%w",
+			configRelDir, err)
+	}
+
+	commits := make(map[string]string)
+	files := configTree.Files()
+
+	err = files.ForEach(func(file *object.File) error {
+		if filepath.Ext(file.Name) != ".toml" {
+			return nil
+		}
+
+		content, err := file.Contents()
+		if err != nil {
+			return fmt.Errorf("reading upstream commit TOML %#q:\n%w", file.Name, err)
+		}
+
+		var config projectconfig.ConfigFile
+		if err := toml.Unmarshal([]byte(content), &config); err != nil {
+			return fmt.Errorf("parsing %#q:\n%w", filepath.Join(configRelDir, file.Name), err)
+		}
+
+		for name, component := range config.Components {
+			if component.Spec.UpstreamCommit != "" {
+				commits[name] = component.Spec.UpstreamCommit
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("iterating upstream commit TOMLs:\n%w", err)
+	}
+
+	return commits, nil
 }
 
 // compareSources compares the rendered sources file between two git trees.

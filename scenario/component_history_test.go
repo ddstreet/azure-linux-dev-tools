@@ -100,18 +100,6 @@ func TestComponentHistory_Smoke(t *testing.T) {
 	gitInDir(t, projectDir, "add", ".")
 	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 
-	// Seed two commits to curl's lock file so the lock-change details path has
-	// something to report.
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		`upstream-commit = "curl-v1"`+"\n")
-	gitInDir(t, projectDir, "add", "locks/curl.lock")
-	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "curl: initial lock")
-
-	writeFileInDir(t, projectDir, "locks/curl.lock",
-		`upstream-commit = "curl-v2"`+"\n")
-	gitInDir(t, projectDir, "add", "locks/curl.lock")
-	gitInDir(t, projectDir, "-c", "commit.gpgsign=false", "commit", "-m", "curl: update lock")
-
 	// Default run: bare components are filtered out.
 	results := runHistory(t, azldevBin, projectDir, "-a")
 	rm := historyMap(results)
@@ -133,20 +121,8 @@ func TestComponentHistory_Smoke(t *testing.T) {
 	assert.True(t, curl.SharedToml, "curl shares azldev.toml with bash")
 	assert.Equal(t, 1, curl.TomlCommits, "only the initial commit touched the shared azldev.toml")
 
-	// Lock-change details include both lock commits with full author/message metadata.
-	require.Equal(t, 2, curl.LockChanges, "expected two lock changes")
-	require.Len(t, curl.LockChangeDetails, curl.LockChanges,
-		"LockChangeDetails length must match LockChanges count")
-
-	for i, change := range curl.LockChangeDetails {
-		assert.NotEmpty(t, change.Hash, "change[%d].Hash should be populated", i)
-		assert.NotEmpty(t, change.Author, "change[%d].Author should be populated", i)
-		assert.NotEmpty(t, change.Message, "change[%d].Message should be populated", i)
-		assert.Positive(t, change.Timestamp, "change[%d].Timestamp should be populated", i)
-	}
-
 	// With --include-bare both components show up. With more than one result,
-	// LockChangeDetails is suppressed in JSON output to keep responses
+	// per-commit details are suppressed in JSON output to keep responses
 	// bounded on -a runs (count is still populated).
 	results = runHistory(t, azldevBin, projectDir, "-a", "--include-bare")
 	rm = historyMap(results)
@@ -154,10 +130,8 @@ func TestComponentHistory_Smoke(t *testing.T) {
 	require.Contains(t, rm, "curl", "customized component should still be reported with --include-bare")
 	require.Contains(t, rm, "bash", "bare component should be reported with --include-bare")
 	assert.Equal(t, 0, rm["bash"].Customizations, "bash has no customizations")
-	assert.Equal(t, 2, rm["curl"].LockChanges,
-		"LockChanges count should still be populated on multi-result runs")
-	assert.Nil(t, rm["curl"].LockChangeDetails,
-		"LockChangeDetails should be suppressed when more than one component is reported")
+	assert.Nil(t, rm["curl"].UpstreamCommitChangeDetails,
+		"details should be suppressed when more than one component is reported")
 
 	// Explicit single-component query for a bare component: --include-bare
 	// is force-disabled so the user gets the row they asked for.
@@ -169,14 +143,13 @@ func TestComponentHistory_Smoke(t *testing.T) {
 	assert.Equal(t, 0, rm["bash"].Customizations)
 
 	// Explicit single-component query for curl: even though curl shares its TOML,
-	// being the only surviving row means LockChangeDetails is retained
+	// being the only surviving row means per-commit details are retained
 	// (the multi-result suppression only kicks in with >1 row).
 	results = runHistory(t, azldevBin, projectDir, "curl")
 	rm = historyMap(results)
 	require.Contains(t, rm, "curl")
 	require.Len(t, results, 1, "explicit single-component query returns exactly one row")
-	assert.Len(t, rm["curl"].LockChangeDetails, 2,
-		"single surviving row retains its LockChangeDetails")
+	assert.Empty(t, rm["curl"].UpstreamCommitChangeDetails)
 
 	// --shared=omit without an explicit selection drops shared-TOML rows. Both
 	// curl and bash live in the shared azldev.toml, so the omit run is empty.

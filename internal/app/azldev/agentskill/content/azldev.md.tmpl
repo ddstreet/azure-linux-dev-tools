@@ -29,7 +29,7 @@ images assemble RPMs into bootable artifacts.
   versions, and build inputs.
 - **Rendered spec** — the generated `.spec` after overlays; a build input, never
   hand-edited.
-- **Lock** — a per-component file pinning the resolved upstream commit.
+- **Upstream commit config** — generated component TOML pinning the resolved upstream commit.
 
 ## Common commands
 
@@ -46,7 +46,7 @@ Everyday tasks (add `-q -O json` when scripting):
 | Add a component | `azldev comp add` |
 | Build a component | `azldev comp build -p <name>` |
 | Render specs | `azldev comp render -p <name>` (or `-a`) |
-| Refresh a lock | `azldev comp update -p <name>` |
+| Refresh an upstream commit | `azldev comp update -p <name>` |
 | List / build images | `azldev image list` / `azldev image build` |
 
 `comp` is an alias for `component`. Always confirm current syntax with
@@ -63,7 +63,7 @@ mock helpers; it is intentionally omitted from normal help.
 - Annotate an overlay's intent (category, upstream status, provenance) — read the `azldev-overlay-metadata` skill.
 - Build, iterate, and debug a component — read the `azldev-build-component` skill.
 - Build, boot, and register images — read the `azldev-image` skill.
-- Refresh a lock and finalize for a PR — read the `azldev-update-component` skill.
+- Refresh an upstream commit and finalize for a PR — read the `azldev-update-component` skill.
 - Remove a component — read the `azldev-remove-component` skill.
 - Test built RPMs in a chroot — read the `azldev-mock` skill.
 
@@ -71,7 +71,7 @@ mock helpers; it is intentionally omitted from normal help.
 
 - **Never edit generated output** — rendered specs and the output/work/log dirs are
   produced by azldev. Change the source config and re-render.
-- **Refresh locks after source-resolution changes** — run `azldev comp update` after
+- **Refresh upstream commits after source-resolution changes** — run `azldev comp update` after
   changing a commit pin, upstream distro/version, or snapshot.
 - **Every overlay needs a `description`** explaining why the change is needed.
 

@@ -63,7 +63,7 @@ var skills = []Skill{
 		Description: "Read this before running azldev or editing azldev config, and whenever working " +
 			"in a repo that contains an azldev.toml file; do not guess azldev's commands or config. " +
 			"Explains how to use the azldev CLI to build a distro from TOML config, including the core " +
-			"concepts (components, overlays, distros, rendered specs, locks), running azldev (repo root or " +
+			"concepts (components, overlays, distros, rendered specs, upstream commit config), running azldev (repo root or " +
 			"-C, plus the -q and -O json flags), the common commands, and where to go for each workflow. " +
 			"Triggers include azldev, comp build, comp render, comp update, build a component, add a " +
 			"component, distro config.",
@@ -81,10 +81,10 @@ var skills = []Skill{
 	{
 		Name: "azldev-update-component",
 		Description: "Read this before finalizing a component change, changing source resolution, or " +
-			"touching a lock file; lock edits are easy to get wrong. Explains how to refresh azldev " +
-			"component lock files with 'azldev comp update', covering when to run update versus render, the " +
+			"editing generated upstream commit TOML by hand. Explains how to refresh commits with " +
+			"'azldev comp update', covering when to run update versus render, the " +
 			"update/render/commit/re-render/amend workflow, and per-component versus -a refresh. Triggers " +
-			"include comp update, refresh lock, bump pin, change snapshot, upstream distro, lock drift, " +
+			"include comp update, refresh upstream commit, bump pin, change snapshot, upstream distro, commit drift, " +
 			"version bump, finalize component.",
 		bodyTemplate: "update-component.md.tmpl",
 	},
@@ -246,7 +246,7 @@ var instructions = []Instruction{
 			{Skill: "azldev-add-component", Purpose: "to add a new component"},
 			{Skill: "azldev-overlays", Purpose: "to add or change overlays"},
 			{Skill: "azldev-overlay-metadata", Purpose: "to annotate an overlay's category and upstream status"},
-			{Skill: "azldev-update-component", Purpose: "to refresh a component's lock"},
+			{Skill: "azldev-update-component", Purpose: "to refresh a component's upstream commit"},
 			{Skill: "azldev-remove-component", Purpose: "to remove a component"},
 		},
 	},
@@ -321,8 +321,8 @@ type Command struct {
 // from azldev's built-in defaults when it is not, so the emitted documentation stays
 // accurate for a default project even with no configuration present.
 type Bindings struct {
-	// LockDir is the repo-relative directory holding per-component lock files.
-	LockDir string
+	// UpstreamCommitsDir holds generated per-component commit TOMLs.
+	UpstreamCommitsDir string
 
 	// RenderedSpecsDir is the repo-relative directory holding rendered component specs.
 	RenderedSpecsDir string
@@ -343,7 +343,7 @@ type Params struct {
 
 	// Bindings are the target-repo values resolved from the repo's configuration
 	// (or azldev defaults when none is available). Embedded so templates can reference
-	// its fields directly (e.g. '{{ .LockDir }}').
+	// its fields directly (e.g. '{{ .UpstreamCommitsDir }}').
 	Bindings
 }
 

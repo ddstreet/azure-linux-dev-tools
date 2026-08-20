@@ -13,6 +13,7 @@ The following fields are nested under the `[project]` TOML section:
 | Work directory | `work-dir` | string | No | Path to the temporary working directory for build artifacts (relative to this config file) |
 | Output directory | `output-dir` | string | No | Path to the directory where final build outputs (RPMs, SRPMs) are placed (relative to this config file) |
 | Rendered specs directory | `rendered-specs-dir` | string | No | Output directory for `component render` (relative to this config file) |
+| Legacy lock directory | `lock-dir` | string | No | Deprecated compatibility field; accepted but ignored because lock files are no longer used |
 | Default distro | `default-distro` | [DistroReference](distros.md#distro-references) | No | The default distro and version to use when building components |
 
 > **Note:** `[default-component-config]`, `[default-package-config]`, and `[package-groups]` are **top-level** TOML sections — they are not nested under `[project]`. They are documented in the sections below.

@@ -11,14 +11,14 @@ import (
 	componentcmds "github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/component"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/testutils"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
+	"github.com/microsoft/azure-linux-dev-tools/internal/upstreamcommit"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const testLockDir = "/project/locks"
+const testUpstreamCommitsDir = "/project/base/upstream-commits"
 
 func TestNewUpdateCmd(t *testing.T) {
 	cmd := componentcmds.NewUpdateCmd()
@@ -99,8 +99,7 @@ func setupMockGit(env *testutils.TestEnv, commitHash string) {
 }
 
 // addUpstreamComponent adds an upstream component to the test config
-// without writing a lock file. Used by update tests where the update command
-// itself creates the lock.
+// without pre-populating generated commit TOML.
 func addUpstreamComponent(env *testutils.TestEnv, name string) {
 	env.Config.Components[name] = projectconfig.ComponentConfig{
 		Name: name,
@@ -119,8 +118,7 @@ func TestUpdateComponents_WritesCommit(t *testing.T) {
 	setupMockGit(env, commit)
 	addUpstreamComponent(env, "curl")
 
-	// Pre-create a lock file so the spec file is writable on memfs.
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
 	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
@@ -130,14 +128,15 @@ func TestUpdateComponents_WritesCommit(t *testing.T) {
 	assert.True(t, results[0].Changed)
 	assert.Equal(t, commit, results[0].UpstreamCommit)
 
-	store := lockfile.NewStore(env.TestFS, testLockDir)
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 
-	lock, loadErr := store.Get("curl")
+	savedCommit, exists, loadErr := store.Get("curl")
 	require.NoError(t, loadErr)
-	assert.Equal(t, commit, lock.UpstreamCommit)
+	assert.True(t, exists)
+	assert.Equal(t, commit, savedCommit)
 }
 
-func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeLock(t *testing.T) {
+func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeCommitTOML(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "abc123def456"
@@ -145,7 +144,7 @@ func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeLock(t *testing.T) {
 	setupMockGit(env, commit)
 	addUpstreamComponent(env, "curl")
 
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
 	options := &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
@@ -164,10 +163,11 @@ func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeLock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
-	store := lockfile.NewStore(env.TestFS, testLockDir)
-	lock, err := store.Get("curl")
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	savedCommit, exists, err := store.Get("curl")
 	require.NoError(t, err)
-	assert.Equal(t, commit, lock.UpstreamCommit)
+	assert.True(t, exists)
+	assert.Equal(t, commit, savedCommit)
 }
 
 // TestUpdateComponents_MultipleComponents tests update with multiple components.
@@ -180,7 +180,7 @@ func TestUpdateComponents_MultipleComponents(t *testing.T) {
 	addUpstreamComponent(env, "curl")
 	addUpstreamComponent(env, "bash")
 
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
 	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
@@ -199,18 +199,19 @@ func TestUpdateComponents_MultipleComponents(t *testing.T) {
 	assert.Contains(t, changedNames, "curl")
 	assert.Contains(t, changedNames, "bash")
 
-	// Both should have lock files with resolved commits.
-	store := lockfile.NewStore(env.TestFS, testLockDir)
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 
-	curlLock, err := store.Get("curl")
+	curlCommit, curlExists, err := store.Get("curl")
 	require.NoError(t, err)
-	bashLock, err := store.Get("bash")
+	bashCommit, bashExists, err := store.Get("bash")
 	require.NoError(t, err)
-	assert.Equal(t, commit, curlLock.UpstreamCommit)
-	assert.Equal(t, commit, bashLock.UpstreamCommit)
+	assert.True(t, curlExists)
+	assert.True(t, bashExists)
+	assert.Equal(t, commit, curlCommit)
+	assert.Equal(t, commit, bashCommit)
 }
 
-func TestUpdateComponents_LocalComponentDoesNotWriteLock(t *testing.T) {
+func TestUpdateComponents_LocalComponentDoesNotWriteCommitTOML(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
@@ -221,7 +222,7 @@ func TestUpdateComponents_LocalComponentDoesNotWriteLock(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
 	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
@@ -229,33 +230,87 @@ func TestUpdateComponents_LocalComponentDoesNotWriteLock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
-	store := lockfile.NewStore(env.TestFS, testLockDir)
-	exists, err := store.Exists("local-pkg")
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	_, exists, err := store.Get("local-pkg")
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
 
-// TestUpdateComponents_AdvancesStaleLock is a regression test for the case
-// where a pre-existing lock at commit A and an upstream that has moved to
+func TestUpdateComponents_NonUpstreamComponentRemovesGeneratedCommitTOML(t *testing.T) {
+	env := testutils.NewTestEnv(t)
+
+	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
+		Name: "local-pkg",
+		Spec: projectconfig.SpecSource{
+			SourceType: projectconfig.SpecSourceTypeLocal,
+			Path:       "/project/specs/local-pkg/local-pkg.spec",
+		},
+	}
+
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	require.NoError(t, store.Save("local-pkg", "stale-commit"))
+
+	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
+		ComponentFilter: components.ComponentFilter{
+			ComponentNamePatterns: []string{"local-pkg"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "local-pkg", results[0].Component)
+	assert.True(t, results[0].Changed)
+	assert.True(t, results[0].Removed)
+
+	_, exists, err := store.Get("local-pkg")
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
+func TestUpdateComponents_CheckOnlyDetectsNonUpstreamGeneratedCommitTOML(t *testing.T) {
+	env := testutils.NewTestEnv(t)
+
+	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
+		Name: "local-pkg",
+		Spec: projectconfig.SpecSource{
+			SourceType: projectconfig.SpecSourceTypeLocal,
+			Path:       "/project/specs/local-pkg/local-pkg.spec",
+		},
+	}
+
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	require.NoError(t, store.Save("local-pkg", "stale-commit"))
+
+	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
+		ComponentFilter: components.ComponentFilter{
+			ComponentNamePatterns: []string{"local-pkg"},
+		},
+		CheckOnly: true,
+	})
+	require.ErrorContains(t, err, "local-pkg")
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Changed)
+	assert.True(t, results[0].Removed)
+
+	_, exists, err := store.Get("local-pkg")
+	require.NoError(t, err)
+	assert.True(t, exists, "--check-only must not remove generated TOML files")
+}
+
+// TestUpdateComponents_AdvancesStaleCommit is a regression test for the case
+// where a generated pin is at commit A and the snapshot resolves to
 // commit B must result in B being written (not A echoed back). Without
-// clearing populated lock data before re-resolution, the source provider's
-// locked-commit short-circuit in ResolveIdentity would return A and the
-// lock would never advance.
-func TestUpdateComponents_AdvancesStaleLock(t *testing.T) {
+// clearing the configured pin before re-resolution, source resolution would
+// return A and the generated TOML would never advance.
+func TestUpdateComponents_AdvancesStaleCommit(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const initialCommit = "initial-aaa111"
 
 	const advancedCommit = "advanced-bbb222"
 
-	// Pre-populate a lock at initialCommit (simulates a previous update run).
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
-
-	preExistingLock := lockfile.New()
-	preExistingLock.UpstreamCommit = initialCommit
-
-	store := lockfile.NewStore(env.TestFS, testLockDir)
-	require.NoError(t, store.Save("curl", preExistingLock))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
+	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	require.NoError(t, store.Save("curl", initialCommit))
 
 	addUpstreamComponent(env, "curl")
 
@@ -269,24 +324,20 @@ func TestUpdateComponents_AdvancesStaleLock(t *testing.T) {
 	require.Len(t, results, 1)
 
 	assert.Equal(t, advancedCommit, results[0].UpstreamCommit,
-		"update must re-resolve and return the advanced commit, not echo the locked one")
-	assert.True(t, results[0].Changed, "lock advanced from initial to advanced commit")
+		"update must re-resolve and return the advanced commit, not echo the configured one")
+	assert.True(t, results[0].Changed, "generated commit advanced")
 	assert.Equal(t, initialCommit, results[0].PreviousCommit,
-		"PreviousCommit should track what was in the lock before update")
+		"PreviousCommit should track the prior generated TOML")
 
-	// Verify the lock on disk was actually updated. Use a fresh store to
-	// bypass the cache held by the pre-population store.
-	freshStore := lockfile.NewStore(env.TestFS, testLockDir)
-
-	updatedLock, loadErr := freshStore.Get("curl")
+	freshStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	updatedCommit, exists, loadErr := freshStore.Get("curl")
 	require.NoError(t, loadErr)
-	assert.Equal(t, advancedCommit, updatedLock.UpstreamCommit,
-		"lock file on disk must contain the new commit")
+	assert.True(t, exists)
+	assert.Equal(t, advancedCommit, updatedCommit)
 }
 
 // TestUpdateComponents_CheckOnly_StaleReturnsError verifies that --check-only
-// returns a non-nil error (-> exit 1) when a component's lock is stale, and
-// that no lock file is written.
+// returns a non-nil error when a generated commit TOML is stale without writing.
 func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
@@ -294,12 +345,9 @@ func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 
 	const advancedCommit = "advanced-bbb222"
 
-	// Pre-populate a lock at initialCommit, then move upstream forward.
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
-	preStore := lockfile.NewStore(env.TestFS, testLockDir)
-	preLock := lockfile.New()
-	preLock.UpstreamCommit = initialCommit
-	require.NoError(t, preStore.Save("curl", preLock))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
+	preStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	require.NoError(t, preStore.Save("curl", initialCommit))
 
 	addUpstreamComponent(env, "curl")
 	setupMockGit(env, advancedCommit)
@@ -308,7 +356,7 @@ func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 		CheckOnly:       true,
 	})
-	require.Error(t, err, "stale lock must produce a non-nil error in --check-only mode")
+	require.Error(t, err, "stale TOML must produce a non-nil error in --check-only mode")
 	assert.Contains(t, err.Error(), "stale", "error message should mention staleness")
 	assert.Contains(t, err.Error(), "curl", "error message should name the stale component")
 	assert.Contains(t, err.Error(), "azldev component update -a",
@@ -330,16 +378,15 @@ func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 
 	assert.True(t, foundCurl, "stale curl must appear in returned results slice")
 
-	// Lock on disk must still hold the OLD commit -- --check-only must not write.
-	freshStore := lockfile.NewStore(env.TestFS, testLockDir)
-	lock, loadErr := freshStore.Get("curl")
+	freshStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	savedCommit, exists, loadErr := freshStore.Get("curl")
 	require.NoError(t, loadErr)
-	assert.Equal(t, initialCommit, lock.UpstreamCommit,
-		"--check-only must not modify the lock file on disk")
+	assert.True(t, exists)
+	assert.Equal(t, initialCommit, savedCommit)
 }
 
 // TestUpdateComponents_CheckOnly_FreshReturnsNil verifies that --check-only
-// returns nil (-> exit 0) when all locks are already fresh.
+// returns nil when all generated commit TOMLs are fresh.
 func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
@@ -347,35 +394,36 @@ func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
 
 	setupMockGit(env, commit)
 	addUpstreamComponent(env, "curl")
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
 	options := &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	}
 
-	// Phase 1: populate the lock with a real update run.
+	// Phase 1: populate the generated TOML with a real update run.
 	_, err := componentcmds.UpdateComponents(env.Env, options)
 	require.NoError(t, err)
 
-	// Snapshot the on-disk lock state so we can assert nothing was rewritten.
-	freshStore := lockfile.NewStore(env.TestFS, testLockDir)
-	before, loadErr := freshStore.Get("curl")
+	freshStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	before, beforeExists, loadErr := freshStore.Get("curl")
 	require.NoError(t, loadErr)
+	require.True(t, beforeExists)
 
-	// Phase 2: --check-only against the now-fresh lock. Must return nil.
+	// Phase 2: --check-only against the now-fresh TOML. Must return nil.
 	options.CheckOnly = true
 	_, err = componentcmds.UpdateComponents(env.Env, options)
-	require.NoError(t, err, "fresh locks must return nil error in --check-only mode")
+	require.NoError(t, err, "fresh TOMLs must return nil error in --check-only mode")
 
-	// Lock on disk must be byte-identical (no rewrite, no timestamp churn).
-	freshStore = lockfile.NewStore(env.TestFS, testLockDir)
-	after, loadErr := freshStore.Get("curl")
+	// The configured commit must remain unchanged.
+	freshStore = upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	after, afterExists, loadErr := freshStore.Get("curl")
 	require.NoError(t, loadErr)
-	assert.Equal(t, before.UpstreamCommit, after.UpstreamCommit)
+	require.True(t, afterExists)
+	assert.Equal(t, before, after)
 }
 
 // TestUpdateComponents_CheckOnly_DetectsOrphans verifies that --check-only
-// returns an error when an orphan lock file would be pruned by a normal run,
+// returns an error when an orphan generated TOML would be pruned by a normal run,
 // and that the orphan is NOT actually deleted.
 func TestUpdateComponents_CheckOnly_DetectsOrphans(t *testing.T) {
 	env := testutils.NewTestEnv(t)
@@ -384,33 +432,31 @@ func TestUpdateComponents_CheckOnly_DetectsOrphans(t *testing.T) {
 
 	setupMockGit(env, commit)
 	addUpstreamComponent(env, "curl")
-	require.NoError(t, fileutils.MkdirAll(env.TestFS, testLockDir))
+	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	// First, do a real update so curl's lock is fresh -- isolates the orphan as
+	// First, do a real update so curl's TOML is fresh -- isolates the orphan as
 	// the only thing --check-only should flag.
 	_, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	})
 	require.NoError(t, err)
 
-	// Plant an orphan lock AFTER the update -- a normal update would have
+	// Plant an orphan TOML AFTER the update -- a normal update would have
 	// pruned it. The orphan does NOT correspond to any component in config.
-	preStore := lockfile.NewStore(env.TestFS, testLockDir)
-	orphanLock := lockfile.New()
-	orphanLock.UpstreamCommit = "orphan-commit"
-	require.NoError(t, preStore.Save("removed-pkg", orphanLock))
+	preStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	require.NoError(t, preStore.Save("removed-pkg", "orphan-commit"))
 
 	// --check-only must report the orphan and not delete it.
 	_, err = componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 		CheckOnly:       true,
 	})
-	require.Error(t, err, "orphan lock must produce an error in --check-only mode")
+	require.Error(t, err, "orphan TOML must produce an error in --check-only mode")
 	assert.Contains(t, err.Error(), "orphan")
 	assert.Contains(t, err.Error(), "removed-pkg")
 
-	// Orphan lock must still exist on disk.
-	freshStore := lockfile.NewStore(env.TestFS, testLockDir)
-	_, loadErr := freshStore.Get("removed-pkg")
-	require.NoError(t, loadErr, "--check-only must not prune orphan locks")
+	freshStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
+	_, exists, loadErr := freshStore.Get("removed-pkg")
+	require.NoError(t, loadErr)
+	assert.True(t, exists, "--check-only must not prune orphan TOMLs")
 }

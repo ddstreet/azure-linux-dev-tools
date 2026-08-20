@@ -12,8 +12,6 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
-	"github.com/microsoft/azure-linux-dev-tools/internal/lockfile"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -99,71 +97,41 @@ func testRepoWithTwoCommits(
 	return repo, hashes[0], hashes[1]
 }
 
-// marshalLock serializes a lock to TOML bytes for writing into test git repos.
-func marshalLock(t *testing.T, lock *lockfile.ComponentLock) []byte {
-	t.Helper()
-
-	data, err := toml.Marshal(lock)
-	require.NoError(t, err)
-
-	return data
-}
-
-// makeLock creates a lock with the given upstream commit.
-func makeLock(t *testing.T, upstreamCommit string) []byte {
-	t.Helper()
-
-	lock := lockfile.New()
-	lock.UpstreamCommit = upstreamCommit
-
-	return marshalLock(t, lock)
-}
-
 // --- classifyComponent tests ---
 
 func TestClassifyComponent_Changed(t *testing.T) {
-	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: testCommitOld},
-	}
-	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: testCommitNew},
-	}
+	fromCommits := map[string]string{"curl": testCommitOld}
+	toCommits := map[string]string{"curl": testCommitNew}
 
-	result := classifyComponent("curl", fromLocks, toLocks)
+	result := classifyComponent("curl", fromCommits, toCommits)
 	assert.Equal(t, changeTypeChanged, result.ChangeType)
 }
 
 func TestClassifyComponent_Unchanged(t *testing.T) {
-	locks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: "same"},
-	}
+	commits := map[string]string{"curl": "same"}
 
-	result := classifyComponent("curl", locks, locks)
+	result := classifyComponent("curl", commits, commits)
 	assert.Equal(t, changeTypeUnchanged, result.ChangeType)
 }
 
 func TestClassifyComponent_Added(t *testing.T) {
-	fromLocks := map[string]lockfile.ComponentLock{}
-	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: testCommitNew},
-	}
+	fromCommits := map[string]string{}
+	toCommits := map[string]string{"curl": testCommitNew}
 
-	result := classifyComponent("curl", fromLocks, toLocks)
+	result := classifyComponent("curl", fromCommits, toCommits)
 	assert.Equal(t, changeTypeAdded, result.ChangeType)
 }
 
 func TestClassifyComponent_Deleted(t *testing.T) {
-	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: testCommitOld},
-	}
-	toLocks := map[string]lockfile.ComponentLock{}
+	fromCommits := map[string]string{"curl": testCommitOld}
+	toCommits := map[string]string{}
 
-	result := classifyComponent("curl", fromLocks, toLocks)
+	result := classifyComponent("curl", fromCommits, toCommits)
 	assert.Equal(t, changeTypeDeleted, result.ChangeType)
 }
 
 func TestClassifyComponent_NeverExisted(t *testing.T) {
-	empty := map[string]lockfile.ComponentLock{}
+	empty := map[string]string{}
 
 	result := classifyComponent("curl", empty, empty)
 	assert.Equal(t, changeTypeUnchanged, result.ChangeType)
@@ -251,52 +219,47 @@ func TestCompareSources_NoSourcesAtEitherRef(t *testing.T) {
 // --- Multi-component batch test ---
 
 func TestMultiComponentBatch(t *testing.T) {
-	curlFrom := lockfile.ComponentLock{UpstreamCommit: "curl-v1"}
-	curlTo := lockfile.ComponentLock{UpstreamCommit: "curl-v2"}
-	bashLock := lockfile.ComponentLock{UpstreamCommit: "bash-v1"}
-	sedFrom := lockfile.ComponentLock{UpstreamCommit: "sed-v1"}
-	sedTo := lockfile.ComponentLock{UpstreamCommit: "sed-v2"}
+	curlFrom := "curl-v1"
+	curlTo := "curl-v2"
+	bashCommit := "bash-v1"
+	sedFrom := "sed-v1"
+	sedTo := "sed-v2"
 
-	fromLocks := map[string]lockfile.ComponentLock{
+	fromCommits := map[string]string{
 		"curl": curlFrom,
-		"bash": bashLock,
+		"bash": bashCommit,
 		"sed":  sedFrom,
 	}
 
-	toLocks := map[string]lockfile.ComponentLock{
+	toCommits := map[string]string{
 		"curl": curlTo,
-		"bash": bashLock,
+		"bash": bashCommit,
 		"sed":  sedTo,
 	}
 
-	curlResult := classifyComponent("curl", fromLocks, toLocks)
+	curlResult := classifyComponent("curl", fromCommits, toCommits)
 	assert.Equal(t, changeTypeChanged, curlResult.ChangeType)
 
-	bashResult := classifyComponent("bash", fromLocks, toLocks)
+	bashResult := classifyComponent("bash", fromCommits, toCommits)
 	assert.Equal(t, changeTypeUnchanged, bashResult.ChangeType)
 
-	sedResult := classifyComponent("sed", fromLocks, toLocks)
+	sedResult := classifyComponent("sed", fromCommits, toCommits)
 	assert.Equal(t, changeTypeChanged, sedResult.ChangeType)
 }
 
 // --- Incremental updates test ---
 
 func TestIncrementalUpdates(t *testing.T) {
-	lockV1 := makeLock(t, "aaa")
-	lockV2 := makeLock(t, "bbb")
-	lockV3 := makeLock(t, "ccc")
+	commits := []string{"aaa", "bbb", "ccc"}
 
 	repo, hashes := testRepoWithCommits(t, []testRepoCommit{
 		{files: map[string][]byte{
-			"locks/curl.lock":      lockV1,
 			"SPECS/c/curl/sources": []byte("SHA512 (curl-7.0.tar.gz) = old"),
 		}},
 		{files: map[string][]byte{
-			"locks/curl.lock":      lockV2,
 			"SPECS/c/curl/sources": []byte("SHA512 (curl-8.0.tar.gz) = mid"),
 		}},
 		{files: map[string][]byte{
-			"locks/curl.lock":      lockV3,
 			"SPECS/c/curl/sources": []byte("SHA512 (curl-8.1.tar.gz) = new"),
 		}},
 	})
@@ -316,13 +279,10 @@ func TestIncrementalUpdates(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			fromLocks, readErr := lockfile.ReadAllAtCommit(repo, hashes[testCase.fromIdx], "locks")
-			require.NoError(t, readErr)
+			fromCommits := map[string]string{"curl": commits[testCase.fromIdx]}
+			toCommits := map[string]string{"curl": commits[testCase.toIdx]}
 
-			toLocks, readErr := lockfile.ReadAllAtCommit(repo, hashes[testCase.toIdx], "locks")
-			require.NoError(t, readErr)
-
-			result := classifyComponent("curl", fromLocks, toLocks)
+			result := classifyComponent("curl", fromCommits, toCommits)
 			assert.Equal(t, testCase.changeType, result.ChangeType, "changeType")
 
 			fromTree, treeErr := resolveTree(repo, hashes[testCase.fromIdx])
@@ -341,14 +301,10 @@ func TestIncrementalUpdates(t *testing.T) {
 // --- Config-only change (rebuild without re-upload) ---
 
 func TestConfigOnlyChange(t *testing.T) {
-	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: "config-v1"},
-	}
-	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {UpstreamCommit: "config-v2"},
-	}
+	fromCommits := map[string]string{"curl": "config-v1"}
+	toCommits := map[string]string{"curl": "config-v2"}
 
-	result := classifyComponent("curl", fromLocks, toLocks)
+	result := classifyComponent("curl", fromCommits, toCommits)
 	assert.Equal(t, changeTypeChanged, result.ChangeType, "upstream commit changed")
 }
 
@@ -424,50 +380,50 @@ func TestReadFileFromTreeSafe_NotFound(t *testing.T) {
 // --- classifyComponent table-driven ---
 
 func TestClassifyComponent_TableDriven(t *testing.T) {
-	lockA := lockfile.ComponentLock{UpstreamCommit: "aaa"}
-	lockB := lockfile.ComponentLock{UpstreamCommit: "bbb"}
+	commitA := "aaa"
+	commitB := "bbb"
 
 	tests := []struct {
 		name           string
-		fromLocks      map[string]lockfile.ComponentLock
-		toLocks        map[string]lockfile.ComponentLock
+		fromCommits    map[string]string
+		toCommits      map[string]string
 		wantChangeType string
 	}{
 		{
 			name:           "both present, upstream commit changed",
-			fromLocks:      map[string]lockfile.ComponentLock{"curl": lockA},
-			toLocks:        map[string]lockfile.ComponentLock{"curl": lockB},
+			fromCommits:    map[string]string{"curl": commitA},
+			toCommits:      map[string]string{"curl": commitB},
 			wantChangeType: changeTypeChanged,
 		},
 		{
 			name:           "both present, upstream commit same",
-			fromLocks:      map[string]lockfile.ComponentLock{"curl": lockA},
-			toLocks:        map[string]lockfile.ComponentLock{"curl": lockA},
+			fromCommits:    map[string]string{"curl": commitA},
+			toCommits:      map[string]string{"curl": commitA},
 			wantChangeType: changeTypeUnchanged,
 		},
 		{
 			name:           "added",
-			fromLocks:      map[string]lockfile.ComponentLock{},
-			toLocks:        map[string]lockfile.ComponentLock{"curl": lockA},
+			fromCommits:    map[string]string{},
+			toCommits:      map[string]string{"curl": commitA},
 			wantChangeType: changeTypeAdded,
 		},
 		{
 			name:           "deleted",
-			fromLocks:      map[string]lockfile.ComponentLock{"curl": lockA},
-			toLocks:        map[string]lockfile.ComponentLock{},
+			fromCommits:    map[string]string{"curl": commitA},
+			toCommits:      map[string]string{},
 			wantChangeType: changeTypeDeleted,
 		},
 		{
 			name:           "never existed",
-			fromLocks:      map[string]lockfile.ComponentLock{},
-			toLocks:        map[string]lockfile.ComponentLock{},
+			fromCommits:    map[string]string{},
+			toCommits:      map[string]string{},
 			wantChangeType: changeTypeUnchanged,
 		},
 	}
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			result := classifyComponent("curl", testCase.fromLocks, testCase.toLocks)
+			result := classifyComponent("curl", testCase.fromCommits, testCase.toCommits)
 			assert.Equal(t, testCase.wantChangeType, result.ChangeType)
 		})
 	}

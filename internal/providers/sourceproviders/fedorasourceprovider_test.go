@@ -1044,21 +1044,16 @@ func TestCheckoutTargetCommit_UpstreamCommit(t *testing.T) {
 	})
 }
 
-// TestGetComponent_LockedCommitTakesPriorityOverConfigPin verifies that the
-// fetch path (used by render/build) uses EffectiveUpstreamCommit, which prefers
-// the locked commit over the config pin. When both Locked.UpstreamCommit and
-// Spec.UpstreamCommit are set, Checkout must be called with the locked value.
-func TestGetComponent_LockedCommitTakesPriorityOverConfigPin(t *testing.T) {
+// TestGetComponent_UsesConfigPin verifies that render/build checkout the
+// upstream commit from normal component configuration.
+func TestGetComponent_UsesConfigPin(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	ctrl := gomock.NewController(t)
 	mockGitProvider := git_test.NewMockGitProvider(ctrl)
 	mockExtractor := fedorasource_test.NewMockFedoraSourceDownloader(ctrl)
 
-	const (
-		configPinCommit = "config-pin-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		lockedCommit    = "locked-commit-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	)
+	const configPinCommit = "config-pin-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	provider, err := sourceproviders.NewFedoraSourcesProviderImpl(
 		env.FS(),
@@ -1078,9 +1073,6 @@ func TestGetComponent_LockedCommitTakesPriorityOverConfigPin(t *testing.T) {
 			SourceType:     projectconfig.SpecSourceTypeUpstream,
 			UpstreamCommit: configPinCommit,
 		},
-		Locked: &projectconfig.ComponentLockData{
-			UpstreamCommit: lockedCommit,
-		},
 	})
 
 	mockGitProvider.EXPECT().
@@ -1091,10 +1083,8 @@ func TestGetComponent_LockedCommitTakesPriorityOverConfigPin(t *testing.T) {
 			return fileutils.WriteFile(env.FS(), specPath, []byte("Name: "+testPackageName), fileperms.PublicFile)
 		})
 
-	// Critical: Checkout must use the LOCKED commit, not the config pin.
-	// gomock will fail the test if Checkout is called with anything else.
 	mockGitProvider.EXPECT().
-		Checkout(gomock.Any(), gomock.Any(), lockedCommit).
+		Checkout(gomock.Any(), gomock.Any(), configPinCommit).
 		Return(nil)
 
 	mockExtractor.EXPECT().

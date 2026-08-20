@@ -192,7 +192,7 @@ func handleToolCall(
 		// env.DryRun() and the loaded config still reflect the server's startup values. As a result a
 		// mutating tool invoked with '--dry-run=true' would still write. Until the MCP rework gives
 		// each call its own Env, only expose commands that do not modify managed project state
-		// (specs, locks, config) on their own: read-only commands (marked with
+		// (specs and config) on their own: read-only commands (marked with
 		// [azldev.ExportAsReadOnlyMCPTool]), or ones that write solely to a caller-provided output
 		// path, such as 'docs markdown' or 'component diff-sources --output-file'.
 		capturedText, execErr := captureStdout(func() error {

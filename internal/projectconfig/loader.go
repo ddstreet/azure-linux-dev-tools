@@ -222,30 +222,30 @@ func mergeComponentGroups(resolvedCfg *ProjectConfig, loadedCfg *ConfigFile) err
 }
 
 // mergeComponents merges component definitions from a loaded config file into
-// the resolved config. Components support additive merging: if a component
-// already exists, its fields are updated from the new definition.
+// the resolved config. Later definitions override fields from earlier files.
 func mergeComponents(resolvedCfg *ProjectConfig, loadedCfg *ConfigFile) error {
 	for componentName, component := range loadedCfg.Components {
 		// Fill out fields not explicitly serialized.
 		component.Name = componentName
+
 		component.SourceConfigFile = loadedCfg
 
-		resolved := component.WithAbsolutePaths(loadedCfg.dir)
-		for i := range resolved.OverlayFiles {
-			resolved.OverlayFiles[i] = makeAbsolute(loadedCfg.dir, resolved.OverlayFiles[i])
+		// Track commit provenance separately from the component's primary TOML.
+		// Synthetic history must follow the file that actually changed the pin,
+		// even when another partial component definition is merged later.
+		if component.Spec.UpstreamCommit != "" {
+			component.upstreamCommitConfigFile = loadedCfg
 		}
 
+		resolvedComponent := component.WithAbsolutePaths(loadedCfg.dir)
 		if existing, ok := resolvedCfg.Components[componentName]; ok {
-			err := existing.MergeUpdatesFrom(resolved)
-			if err != nil {
+			if err := existing.MergeUpdatesFrom(resolvedComponent); err != nil {
 				return fmt.Errorf("failed to merge component %#q:\n%w", componentName, err)
 			}
 
-			// Preserve the latest source config file reference.
-			existing.SourceConfigFile = loadedCfg
 			resolvedCfg.Components[componentName] = existing
 		} else {
-			resolvedCfg.Components[componentName] = *resolved
+			resolvedCfg.Components[componentName] = *resolvedComponent
 		}
 	}
 
@@ -482,8 +482,10 @@ func loadProjectConfigFile(
 	cfg.sourcePath = absFilePath
 	cfg.dir = filepath.Dir(absFilePath)
 
-	// Make sure that the read data is internally consistent.
-	err = cfg.Validate()
+	// Component definitions support additive merging across files, so validate
+	// them only after the complete project configuration has been assembled.
+	// Syntax and unknown fields were already checked by the TOML decoder.
+	err = cfg.validateNonComponentFields()
 	if err != nil {
 		return nil, err
 	}
