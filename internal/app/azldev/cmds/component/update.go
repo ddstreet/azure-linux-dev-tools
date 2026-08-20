@@ -30,10 +30,6 @@ type UpdateComponentOptions struct {
 	// `azldev component update -a --check-only` exits 0 when locks are
 	// fresh and 1 when something is stale.
 	CheckOnly bool
-	// ForceRecalculate disables freshness optimizations that skip
-	// re-resolution for unchanged components. When set, all components
-	// are re-resolved regardless of their freshness status.
-	ForceRecalculate bool
 }
 
 func updateOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
@@ -91,12 +87,6 @@ any component is stale or any lock would be pruned. Intended for CI gates.`,
 			"or prune orphans. Exits 0 when nothing would change and 1 when any "+
 			"component is stale (or, with --all-components, when any orphan lock "+
 			"would be pruned). Intended for CI gates")
-	cmd.Flags().BoolVar(&options.ForceRecalculate, "force-recalculate", false,
-		"force re-resolution of all components, ignoring freshness checks that "+
-			"would skip unchanged components. Use when upstream state may have "+
-			"changed independently of the snapshot time and the new commit is "+
-			"preferred")
-
 	// Update always skips lock validation (it's the lock writer), so the
 	// flag is meaningless here. Hide it to avoid confusion.
 	_ = cmd.Flags().MarkHidden("skip-lock-validation")
@@ -124,12 +114,6 @@ type UpdateResult struct {
 	// for local components this is a content hash of the spec directory.
 	// Used as SourceIdentity input for fingerprint computation.
 	sourceIdentity string `json:"-" table:"-"`
-
-	// upToDate is set by the freshness check (Case 1) when both the input
-	// fingerprint and resolution hash match the lock. Components marked
-	// upToDate are skipped by [saveComponentLocks] — no re-fingerprinting
-	// or lock rewrite is needed.
-	upToDate bool `json:"-" table:"-"`
 }
 
 // UpdateComponents resolves source identities for all selected components and
@@ -144,11 +128,6 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 	// Skip lock validation — update is the lock file writer, so missing or
 	// stale locks are expected and will be fixed by this command.
 	options.ComponentFilter.SkipLockValidation = true
-	// Enable freshness checking so the resolver computes FreshnessStatus for
-	// each component. This lets resolveSourceIdentitiesParallel skip
-	// re-resolution for components whose resolution inputs haven't changed.
-	// Disabled when --force-recalculate is set.
-	resolver.CheckFreshness = !options.ForceRecalculate
 
 	resolved, err := resolver.FindComponents(&options.ComponentFilter)
 	if err != nil {
@@ -325,7 +304,7 @@ func saveComponentLocks(env *azldev.Env, store *lockfile.Store, results []Update
 	}()
 
 	for idx := range results {
-		if results[idx].Error != "" || results[idx].Skipped || results[idx].upToDate {
+		if results[idx].Error != "" || results[idx].Skipped {
 			continue
 		}
 
@@ -392,12 +371,7 @@ func updateComponentLock(env *azldev.Env, store *lockfile.Store, result *UpdateR
 
 	lock.InputFingerprint = identity.Fingerprint
 
-	// Update resolution input hash for upstream components.
-	resHashChanged := updateResolutionHash(env, result.config, lock)
-
-	// Write if either hash changed. ResolutionInputHash updates are silent
-	// (don't set Changed) since they don't affect build outputs.
-	if !result.Changed && !resHashChanged {
+	if !result.Changed {
 		return false, nil
 	}
 
@@ -413,31 +387,6 @@ func updateComponentLock(env *azldev.Env, store *lockfile.Store, result *UpdateR
 	}
 
 	return true, nil
-}
-
-// updateResolutionHash computes and stores the resolution input hash for
-// upstream components. Returns true if the hash changed. Local components
-// don't use upstream resolution, so the hash is left empty for them.
-func updateResolutionHash(
-	env *azldev.Env, config *projectconfig.ComponentConfig, lock *lockfile.ComponentLock,
-) bool {
-	if config.Spec.SourceType != projectconfig.SpecSourceTypeUpstream {
-		return false
-	}
-
-	resInputs, resErr := components.BuildUpstreamCommitResolutionInputs(env, config)
-	if resErr != nil {
-		slog.Debug("Cannot compute resolution hash",
-			"component", config.Name, "error", resErr)
-
-		return false
-	}
-
-	resHash := fingerprint.ComputeResolutionHash(resInputs)
-	changed := lock.ResolutionInputHash != resHash
-	lock.ResolutionInputHash = resHash
-
-	return changed
 }
 
 // checkUpdateErrors returns an error if any component failed to resolve.
@@ -518,16 +467,15 @@ func resolveSourceIdentitiesParallel(
 	workerEnv, cancel := env.WithCancel()
 	defer cancel()
 
-	total := int64(len(comps))
-
-	// Pre-filter: cases 1 and 2 fill results synchronously (no upstream
-	// contact needed); case 3 needs parallel resolution.
-	parallel, syncCompleted := classifyForResolution(comps, results)
-
-	// Surface sync-skip progress immediately so users see movement even when
-	// the parallel batch is empty or slow to start.
-	if syncCompleted > 0 {
-		progressEvent.SetProgress(syncCompleted, total)
+	// Resolve every selected component instead of inferring freshness from a
+	// hash of snapshot, distro, and pin inputs stored in the lock. Removing that
+	// duplicate resolution state makes update behavior direct: the provider is
+	// the authority for the current identity, and the resulting identity is
+	// compared with the lock before deciding whether to write.
+	parallel := make([]parallelItem, len(comps))
+	for idx, comp := range comps {
+		results[idx].Component = comp.GetName()
+		parallel[idx] = parallelItem{idx: idx, comp: comp}
 	}
 
 	// Each resolution may involve network I/O (upstream git clone) or
@@ -537,7 +485,7 @@ func resolveSourceIdentitiesParallel(
 		env.FastConcurrency(),
 		parallel,
 		func(done, _ int) {
-			progressEvent.SetProgress(syncCompleted+int64(done), total)
+			progressEvent.SetProgress(int64(done), int64(len(comps)))
 		},
 		func(ctx context.Context, item parallelItem) struct{} {
 			resolveAndRecordIdentity(ctx, workerEnv, cancel, item.comp, store, &results[item.idx])
@@ -563,63 +511,6 @@ func resolveSourceIdentitiesParallel(
 type parallelItem struct {
 	idx  int
 	comp components.Component
-}
-
-// classifyForResolution applies the three-way freshness check to each
-// component. Cases 1 and 2 (fully fresh / build-input-only changes) are
-// resolved synchronously by mutating results in place. Case 3 components are
-// returned in the parallel slice for upstream resolution. syncCompleted is
-// the count of cases 1+2, used to seed the progress event.
-//
-// Only upstream components qualify for the freshness shortcut — local
-// components resolve via filesystem hashing (cheap, no network), so skipping
-// gains little and their empty UpstreamCommit can't serve as source identity.
-//
-//  1. FreshnessCurrent → nothing changed, skip entirely (no re-resolution).
-//  2. FreshnessStale + resolution fresh → only build inputs changed
-//     (e.g., overlay edit). Reuse locked commit, but enter save path
-//     to update the fingerprint.
-//  3. FreshnessStale + resolution stale → resolution inputs changed
-//     (e.g., snapshot bump). Must re-resolve upstream.
-func classifyForResolution(
-	comps []components.Component, results []UpdateResult,
-) (parallel []parallelItem, syncCompleted int64) {
-	parallel = make([]parallelItem, 0, len(comps))
-
-	for idx, comp := range comps {
-		results[idx].Component = comp.GetName()
-
-		locked := comp.GetConfig().Locked
-		isUpstream := comp.GetConfig().Spec.SourceType == projectconfig.SpecSourceTypeUpstream
-
-		if isUpstream && locked != nil && locked.Freshness == projectconfig.FreshnessCurrent {
-			// Case 1: fully up-to-date — skip.
-			results[idx].UpstreamCommit = locked.UpstreamCommit
-			results[idx].sourceIdentity = comp.GetConfig().EffectiveUpstreamCommit()
-			results[idx].upToDate = true
-			syncCompleted++
-
-			continue
-		}
-
-		if isUpstream && locked != nil && locked.Freshness == projectconfig.FreshnessStale &&
-			!locked.ResolutionStale && locked.UpstreamCommit != "" {
-			// Case 2: build inputs changed but resolution inputs unchanged.
-			// Reuse the locked commit — re-resolving would yield the same hash.
-			results[idx].UpstreamCommit = locked.UpstreamCommit
-			results[idx].PreviousCommit = locked.UpstreamCommit
-			results[idx].sourceIdentity = comp.GetConfig().EffectiveUpstreamCommit()
-			results[idx].config = comp.GetConfig()
-			syncCompleted++
-
-			continue
-		}
-
-		// Case 3: resolution stale, unknown, or no lock — must re-resolve.
-		parallel = append(parallel, parallelItem{idx: idx, comp: comp})
-	}
-
-	return parallel, syncCompleted
 }
 
 // resolveAndRecordIdentity resolves a single component's source identity and

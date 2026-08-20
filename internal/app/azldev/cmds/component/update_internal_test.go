@@ -163,20 +163,3 @@ func TestSaveComponentLocks_SkipsErrorAndSkipped(t *testing.T) {
 	exists2, _ := store.Exists("skipped")
 	assert.False(t, exists2)
 }
-
-func TestSaveComponentLocks_SkipsUpToDate(t *testing.T) {
-	env := testutils.NewTestEnv(t)
-	store := newTestStore(t, env)
-
-	// upToDate means the component was skipped by freshness check (Case 1) —
-	// saveComponentLocks should silently skip it, not error.
-	results := []UpdateResult{
-		{Component: "skipped-fresh", UpstreamCommit: "abc", upToDate: true},
-	}
-
-	err := saveComponentLocks(env.Env, store, results, false)
-	require.NoError(t, err)
-
-	exists, _ := store.Exists("skipped-fresh")
-	assert.False(t, exists, "upToDate component should not get a lock file")
-}

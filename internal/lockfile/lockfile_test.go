@@ -159,7 +159,8 @@ func TestSaveOmitsRemovedFields(t *testing.T) {
 	require.NoError(t, err)
 
 	lock, err := lockfile.Parse([]byte(
-		"version = 99\nimport-commit = \"legacy\"\ninput-fingerprint = \"sha256:test\"\n",
+		"version = 99\nimport-commit = \"legacy\"\nresolution-input-hash = \"legacy\"\n" +
+			"input-fingerprint = \"sha256:test\"\n",
 	))
 	require.NoError(t, err)
 	require.NoError(t, lock.Save(memFS, lockPath))
@@ -169,6 +170,7 @@ func TestSaveOmitsRemovedFields(t *testing.T) {
 
 	assert.NotContains(t, string(data), "version")
 	assert.NotContains(t, string(data), "import-commit")
+	assert.NotContains(t, string(data), "resolution-input-hash")
 	assert.Contains(t, string(data), "input-fingerprint")
 }
 
@@ -250,23 +252,6 @@ func TestMultipleComponentsIndependentFiles(t *testing.T) {
 	}
 }
 
-func TestResolutionInputHashRoundTrip(t *testing.T) {
-	memFS := afero.NewMemMapFs()
-	lockPath, err := lockfile.LockPath(testLockDir, "curl")
-	require.NoError(t, err)
-
-	// v2 field: currently stubbed but should survive round-trip.
-	lock := lockfile.New()
-	lock.UpstreamCommit = testCommitHash
-	lock.ResolutionInputHash = "sha256:resolution-inputs"
-
-	require.NoError(t, lock.Save(memFS, lockPath))
-
-	loaded, err := lockfile.Load(memFS, lockPath)
-	require.NoError(t, err)
-	assert.Equal(t, "sha256:resolution-inputs", loaded.ResolutionInputHash)
-}
-
 func TestOmitEmptyFields(t *testing.T) {
 	memFS := afero.NewMemMapFs()
 	lockPath, err := lockfile.LockPath(testLockDir, "local-pkg")
@@ -283,7 +268,6 @@ func TestOmitEmptyFields(t *testing.T) {
 
 	content := string(data)
 	assert.NotContains(t, content, "upstream-commit", "empty upstream-commit should be omitted")
-	assert.NotContains(t, content, "resolution-input-hash", "empty resolution-input-hash should be omitted")
 	assert.Contains(t, content, "input-fingerprint")
 }
 
