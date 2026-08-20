@@ -589,17 +589,11 @@ func computeCurrentFingerprint(
 		return "", nil
 	}
 
-	var manualBump int
-	if config.Locked != nil {
-		manualBump = config.Locked.ManualBump
-	}
-
 	identity, err := fingerprint.ComputeIdentity(
 		fs,
 		*config,
 		releaseVer,
 		fingerprint.IdentityOptions{
-			ManualBump:     manualBump,
 			SourceIdentity: sourceIdentity,
 		},
 	)

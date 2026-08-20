@@ -231,11 +231,6 @@ type HistoryResult struct {
 	// import-commit (i.e., the component was forked from upstream).
 	HasImport bool `json:"hasImport,omitempty" table:"-"`
 
-	// ManualBump is the lock file's manual-bump counter. Always emitted
-	// (no omitempty) so a real bump of 0 isn't indistinguishable from an
-	// absent field; pair it with HasLock to tell "no lock" from "bump 0".
-	ManualBump int `json:"manualBump" table:"-"`
-
 	// Warnings collects per-component diagnostics for failure paths that
 	// were swallowed to keep the overall report rendering. Empty when no
 	// problems were encountered. Surfaces in the single-component card

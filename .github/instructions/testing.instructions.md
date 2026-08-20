@@ -149,7 +149,6 @@ Use `env.WriteLock(t, name, lock)` to create lock files on the test filesystem:
 ```go
 lock := lockfile.New()
 lock.UpstreamCommit = "abc123"
-lock.ManualBump = 1
 env.WriteLock(t, "curl", lock)
 ```
 

@@ -400,20 +400,6 @@ func TestConfigOnlyChange(t *testing.T) {
 	assert.Equal(t, changeTypeChanged, result.ChangeType, "fingerprint changed")
 }
 
-// --- Manual bump (fingerprint changes, sources same) ---
-
-func TestManualBumpOnly(t *testing.T) {
-	fromLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: "sha256:bump0"},
-	}
-	toLocks := map[string]lockfile.ComponentLock{
-		"curl": {InputFingerprint: "sha256:bump1"},
-	}
-
-	result := classifyComponent("curl", fromLocks, toLocks)
-	assert.Equal(t, changeTypeChanged, result.ChangeType, "manual bump changes fingerprint")
-}
-
 // --- resolveTree / readFileFromTree / helpers ---
 
 func TestResolveTree(t *testing.T) {

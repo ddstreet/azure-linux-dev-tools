@@ -794,7 +794,7 @@ value = "Microsoft"
 }
 
 // When a lock file exists for a component, the resolver should attach all of
-// its data (commit, import-commit, manual-bump, fingerprint) to the resolved
+// its data (commit, import-commit, fingerprint) to the resolved
 // component via the Locked field — without touching the original Spec config.
 // This is how downstream commands (render, build) get the locked commit.
 func TestFindComponents_PopulatesLockedData(t *testing.T) {
@@ -812,7 +812,6 @@ func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	lock := lockfile.New()
 	lock.UpstreamCommit = "locked-commit-abc123"
 	lock.ImportCommit = "import-commit-def456"
-	lock.ManualBump = 2
 	lock.InputFingerprint = "sha256:test-fingerprint"
 
 	env.WriteLock(t, "curl", lock)
@@ -829,7 +828,6 @@ func TestFindComponents_PopulatesLockedData(t *testing.T) {
 	require.NotNil(t, comp.GetConfig().Locked, "Locked should be populated when lock file exists")
 	assert.Equal(t, "locked-commit-abc123", comp.GetConfig().Locked.UpstreamCommit)
 	assert.Equal(t, "import-commit-def456", comp.GetConfig().Locked.ImportCommit)
-	assert.Equal(t, 2, comp.GetConfig().Locked.ManualBump)
 	assert.Equal(t, "sha256:test-fingerprint", comp.GetConfig().Locked.InputFingerprint)
 
 	// Original config field should NOT be modified.
@@ -971,7 +969,6 @@ func TestFindComponents_LocalComponentWithLockFile(t *testing.T) {
 	// Write a lock file for the local component.
 	lock := lockfile.New()
 	lock.InputFingerprint = "sha256:test-local-fingerprint"
-	lock.ManualBump = 1
 
 	env.WriteLock(t, "local-pkg", lock)
 
@@ -985,7 +982,6 @@ func TestFindComponents_LocalComponentWithLockFile(t *testing.T) {
 
 	require.NotNil(t, comp.GetConfig().Locked, "lock file exists → Locked must be populated")
 	assert.Equal(t, "sha256:test-local-fingerprint", comp.GetConfig().Locked.InputFingerprint)
-	assert.Equal(t, 1, comp.GetConfig().Locked.ManualBump)
 	assert.Empty(t, comp.GetConfig().Locked.UpstreamCommit, "local components have no upstream commit")
 }
 

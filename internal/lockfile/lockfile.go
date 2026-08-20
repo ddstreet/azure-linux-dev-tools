@@ -43,13 +43,8 @@ type ComponentLock struct {
 	// Empty for local components.
 	UpstreamCommit string `toml:"upstream-commit,omitempty"`
 
-	// ManualBump is an extra rebuild counter for mass-rebuild scenarios.
-	// Almost always 0. Incrementing this changes the component's fingerprint,
-	// triggering a new release without any other input change.
-	ManualBump int `toml:"manual-bump,omitempty"`
-
 	// InputFingerprint is the hash of all render inputs (config, overlays,
-	// upstream-commit, manual-bump, distro release version). Recomputed on
+	// upstream-commit, distro release version). Recomputed on
 	// every update. Used to detect when inputs have changed.
 	InputFingerprint string `toml:"input-fingerprint,omitempty"`
 

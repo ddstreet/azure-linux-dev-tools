@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
@@ -24,9 +23,6 @@ import (
 // UpdateComponentOptions holds options for the component update command.
 type UpdateComponentOptions struct {
 	ComponentFilter components.ComponentFilter
-	// Bump increments the manual-rebuild counter on matched components'
-	// lock files. Used for mass-rebuild scenarios.
-	Bump bool
 	// CheckOnly runs the full update pipeline (resolve identities,
 	// recompute fingerprints) but does not write lock files or prune
 	// orphans. Returns a non-nil error when any component would be
@@ -64,14 +60,9 @@ that no longer exist in the project config) are automatically pruned.
 Orphan pruning is skipped when updating individual components to avoid
 accidentally removing lock files for components not included in the filter.
 
-The --bump flag updates matching lock files to increment the manual-rebuild
-counter, triggering a new release. Useful for mass-rebuild scenarios (e.g.,
-toolchain bug, static library update). Orphan pruning is skipped under --bump.
-
 The --check-only flag runs the full pipeline but does NOT write lock files or
 prune orphans. The command exits 0 when nothing would change and exits 1 when
-any component is stale or any lock would be pruned. Intended for CI gates.
-Cannot be combined with --bump.`,
+any component is stale or any lock would be pruned. Intended for CI gates.`,
 		Example: `  # Update all components
   azldev component update -a
 
@@ -80,9 +71,6 @@ Cannot be combined with --bump.`,
 
   # Update components in a group
   azldev component update -g core
-
-  # Bump rebuild counter for a component (triggers new release)
-  azldev component update --bump curl
 
   # CI gate: exit 0 if locks are fresh, 1 if anything would change
   azldev component update -a --check-only -q`,
@@ -98,20 +86,16 @@ Cannot be combined with --bump.`,
 
 	components.AddComponentFilterOptionsToCommand(cmd, &options.ComponentFilter)
 
-	cmd.Flags().BoolVar(&options.Bump, "bump", false,
-		"increment the manual-rebuild counter to trigger a new release")
 	cmd.Flags().BoolVar(&options.CheckOnly, "check-only", false,
 		"resolve identities and recompute fingerprints but do not write lock files "+
 			"or prune orphans. Exits 0 when nothing would change and 1 when any "+
 			"component is stale (or, with --all-components, when any orphan lock "+
-			"would be pruned). Intended for CI gates. Cannot be combined with --bump")
+			"would be pruned). Intended for CI gates")
 	cmd.Flags().BoolVar(&options.ForceRecalculate, "force-recalculate", false,
 		"force re-resolution of all components, ignoring freshness checks that "+
 			"would skip unchanged components. Use when upstream state may have "+
 			"changed independently of the snapshot time and the new commit is "+
 			"preferred")
-
-	cmd.MarkFlagsMutuallyExclusive("bump", "check-only")
 
 	// Update always skips lock validation (it's the lock writer), so the
 	// flag is meaningless here. Hide it to avoid confusion.
@@ -153,10 +137,6 @@ type UpdateResult struct {
 // Lock validation is always skipped regardless of the caller's SkipLockValidation
 // value — update is the lock writer.
 func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]UpdateResult, error) {
-	if options.Bump && options.CheckOnly {
-		return nil, fmt.Errorf("%w: --bump and --check-only are mutually exclusive", azldev.ErrInvalidUsage)
-	}
-
 	resolver := components.NewResolver(env)
 	// Suppress staleness warnings — we're about to refresh the locks ourselves,
 	// so warning the user to "run component update" would be self-referential noise.
@@ -186,21 +166,11 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 		return nil, errors.New("no project directory configured; cannot update lock files")
 	}
 
-	// --bump: re-fingerprint existing locks with an incremented ManualBump.
-	// Does not contact upstream. Skips orphan pruning — bump only touches
-	// existing locks and should not delete entries for components that may
-	// have been removed.
-	if options.Bump {
-		results, bumpErr := bumpComponents(env, store, comps, options)
-		if bumpErr != nil {
-			return filterDisplayResults(results), bumpErr
-		}
-
-		logUpdateSummary(results)
-
-		return filterDisplayResults(results), nil
-	}
-
+	// Every update now derives a change from the component's real inputs or
+	// resolved source identity. There is deliberately no metadata-only rebuild
+	// counter: callers that need a rebuild must make the triggering input change
+	// explicit, so fingerprints and release history continue to explain why the
+	// component changed.
 	results := resolveSourceIdentitiesParallel(env, comps, store)
 
 	// Don't save if the context was cancelled (Ctrl+C).
@@ -420,7 +390,6 @@ func updateComponentLock(env *azldev.Env, store *lockfile.Store, result *UpdateR
 		*result.config,
 		releaseVer,
 		fingerprint.IdentityOptions{
-			ManualBump:     lock.ManualBump,
 			SourceIdentity: result.sourceIdentity,
 		},
 	)
@@ -483,134 +452,6 @@ func updateResolutionHash(
 	lock.ResolutionInputHash = resHash
 
 	return changed
-}
-
-// bumpComponents re-fingerprints each matched component's lock file with an
-// incremented ManualBump counter. Does not contact upstream. Triggers a new
-// release without any other input change - used for mass-rebuild scenarios.
-func bumpComponents(
-	env *azldev.Env, store *lockfile.Store, comps []components.Component, options *UpdateComponentOptions,
-) ([]UpdateResult, error) {
-	results := make([]UpdateResult, 0, len(comps))
-	saved := make([]string, 0, len(comps))
-
-	for _, comp := range comps {
-		// Check for cancellation (Ctrl+C) between components.
-		if env.Context().Err() != nil {
-			if len(saved) > 0 {
-				slog.Info("Lock files bumped before cancellation", "components", saved)
-			}
-
-			return results, fmt.Errorf("bump cancelled; %d of %d components bumped", len(saved), len(comps))
-		}
-
-		name := comp.GetName()
-
-		// Require an existing lock file - bump only makes sense for
-		// components that have already been updated at least once.
-		// Use Get (not GetOrNew) so missing locks produce a clear error
-		// instead of silently creating an empty lock.
-		lock, lockErr := store.Get(name)
-		if lockErr != nil {
-			if options.ComponentFilter.IncludeAllComponents {
-				env.AddFixSuggestion("run 'azldev component update -a' first to populate lock files")
-			} else {
-				env.AddFixSuggestion(fmt.Sprintf("run 'azldev component update -p %s' first", name))
-			}
-
-			return results, fmt.Errorf("cannot bump %#q:\n%w", name, lockErr)
-		}
-
-		lock.ManualBump++
-
-		slog.Info("Bumping component", "component", name, "manualBump", lock.ManualBump)
-
-		// Resolve per-component distro for ReleaseVer, matching the
-		// per-component resolution used by render/build/prepare-sources.
-		releaseVer, distroErr := resolveReleaseVer(env, comp.GetConfig())
-		if distroErr != nil {
-			return results, fmt.Errorf("resolving distro for %#q:\n%w", name, distroErr)
-		}
-
-		// Determine source identity for fingerprint recomputation.
-		srcIdentity, identityErr := resolveLockedSourceIdentity(env, comp, lock)
-		if identityErr != nil {
-			return results, identityErr
-		}
-
-		// Recompute fingerprint with the new ManualBump.
-		identity, fpErr := fingerprint.ComputeIdentity(
-			env.FS(),
-			*comp.GetConfig(),
-			releaseVer,
-			fingerprint.IdentityOptions{
-				ManualBump:     lock.ManualBump,
-				SourceIdentity: srcIdentity,
-			},
-		)
-		if fpErr != nil {
-			return results, fmt.Errorf("computing fingerprint for %#q:\n%w", name, fpErr)
-		}
-
-		lock.InputFingerprint = identity.Fingerprint
-
-		if saveErr := store.Save(name, lock); saveErr != nil {
-			if len(saved) > 0 {
-				slog.Info("Lock files bumped before failure", "components", saved)
-			}
-
-			return results, fmt.Errorf("saving lock for %#q:\n%w", name, saveErr)
-		}
-
-		saved = append(saved, name)
-
-		results = append(results, UpdateResult{
-			Component:      name,
-			UpstreamCommit: lock.UpstreamCommit,
-			Changed:        true,
-		})
-	}
-
-	return results, nil
-}
-
-// resolveLockedSourceIdentity returns the source identity to use when
-// recomputing a component's fingerprint during bump. For upstream components,
-// this is the locked commit (bump doesn't change it). For local components,
-// it re-hashes the spec directory. Does not perform network I/O.
-func resolveLockedSourceIdentity(
-	env *azldev.Env, comp components.Component, lock *lockfile.ComponentLock,
-) (string, error) {
-	name := comp.GetName()
-	sourceType := comp.GetConfig().Spec.SourceType
-
-	switch sourceType {
-	case projectconfig.SpecSourceTypeUpstream:
-		if lock.UpstreamCommit == "" {
-			return "", fmt.Errorf(
-				"lock file for upstream component %#q has no upstream-commit; "+
-					"run 'azldev component update -p %s' to populate it before bumping",
-				name, name)
-		}
-
-		return lock.UpstreamCommit, nil
-
-	case projectconfig.SpecSourceTypeLocal, projectconfig.SpecSourceTypeUnspecified:
-		specPath := comp.GetConfig().Spec.Path
-		if specPath == "" {
-			return "", fmt.Errorf("component %#q has no spec path configured", name)
-		}
-
-		identity, err := sourceproviders.ResolveLocalSourceIdentity(env.FS(), filepath.Dir(specPath))
-		if err != nil {
-			return "", fmt.Errorf("resolving local source identity for %#q:\n%w", name, err)
-		}
-
-		return identity, nil
-
-	default:
-		return "", fmt.Errorf("unsupported source type %#q for component %#q", sourceType, name)
-	}
 }
 
 // checkUpdateErrors returns an error if any component failed to resolve.
