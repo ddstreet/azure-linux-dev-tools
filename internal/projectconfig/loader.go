@@ -463,9 +463,8 @@ func loadProjectConfigFile(
 	// The marker is a TOML comment, so generated files remain ordinary config
 	// documents while the loader can distinguish override-only declarations
 	// from user-authored component definitions without exposing a schema field.
-	cfg.generatedUpstreamCommitOverride = bytes.HasPrefix(
-		data, []byte(GeneratedUpstreamCommitMarker+"\n"),
-	)
+	cfg.generatedUpstreamCommitOverride = bytes.HasPrefix(data, []byte(GeneratedUpstreamCommitMarker+"\n")) ||
+		bytes.HasPrefix(data, []byte(legacyGeneratedUpstreamCommitMarker+"\n"))
 
 	// Keep track of where this came from.
 	cfg.sourcePath = absFilePath

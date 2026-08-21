@@ -28,7 +28,7 @@ dist-git often fail bot detection):
 2. Generate the initial upstream commit config so source resolution is pinned before inspection:
 
     ```sh
-    azldev comp update -p <name>
+    azldev comp update-upstream-commit -p <name>
     ```
 
 3. Pull the sources without overlays into a scratch dir under the work dir:
@@ -74,7 +74,7 @@ The generated config pins the upstream revision you inspected. Refresh it after 
 component inputs settle, then validate:
 
 ```sh
-azldev comp update -p <name>          # resolve and write the generated upstream commit config
+azldev comp update-upstream-commit -p <name> # resolve and write generated upstream commit config
 azldev comp render -p <name>          # apply overlays and write the rendered spec
 azldev comp diff-sources -p <name>    # see exactly what the overlays change
 azldev comp build -p <name>           # build the RPMs
@@ -83,7 +83,7 @@ azldev comp build -p <name>           # build the RPMs
 Inspect the rendered spec under `{{ .RenderedSpecsDir }}/`. A new component always needs a
 smoke test — see the `azldev-build-component` and `azldev-mock` skills.
 
-After all component inputs are final, run `azldev comp update -p <name>` again and
+After all component inputs are final, run `azldev comp update-upstream-commit -p <name>` again and
 re-render. Stage the component definition and sources, `{{ .UpstreamCommitsDir }}/<name>.toml`, and
 the rendered output before committing. Then re-render, stage
 `{{ .RenderedSpecsDir }}/<first-char>/<name>/`, and amend the commit so `%changelog` and

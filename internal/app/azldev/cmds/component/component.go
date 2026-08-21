@@ -32,5 +32,5 @@ components defined in the project configuration.`,
 	prepareOnAppInit(app, cmd)
 	queryOnAppInit(app, cmd)
 	renderOnAppInit(app, cmd)
-	updateOnAppInit(app, cmd)
+	updateUpstreamCommitOnAppInit(app, cmd)
 }

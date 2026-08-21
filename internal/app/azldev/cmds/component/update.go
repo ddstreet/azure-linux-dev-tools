@@ -20,7 +20,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// UpdateComponentOptions holds options for the component update command.
+// UpdateComponentOptions holds options for the component update-upstream-commit command.
 type UpdateComponentOptions struct {
 	ComponentFilter components.ComponentFilter
 	// UpstreamCommitsDir is the project-relative or absolute directory containing
@@ -33,17 +33,17 @@ type UpdateComponentOptions struct {
 
 const defaultUpstreamCommitsDir = "base/upstream-commits"
 
-func updateOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
-	parentCmd.AddCommand(NewUpdateCmd())
+func updateUpstreamCommitOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
+	parentCmd.AddCommand(NewUpdateUpstreamCommitCmd())
 }
 
-// NewUpdateCmd constructs a [cobra.Command] for the "component update" CLI subcommand.
-func NewUpdateCmd() *cobra.Command {
+// NewUpdateUpstreamCommitCmd constructs the "component update-upstream-commit" command.
+func NewUpdateUpstreamCommitCmd() *cobra.Command {
 	options := &UpdateComponentOptions{}
 	options.UpstreamCommitsDir = defaultUpstreamCommitsDir
 
 	cmd := &cobra.Command{
-		Use:   "update",
+		Use:   "update-upstream-commit",
 		Short: "Resolve and record upstream commits for components",
 		Long: `Resolve upstream commits for components and write normal per-component TOML configuration.
 
@@ -62,19 +62,19 @@ The --check-only flag runs the full pipeline but does NOT write TOML files or
 prune orphans. The command exits 0 when nothing would change and exits 1 when
 any component is stale or any generated TOML would be pruned. Intended for CI gates.`,
 		Example: `  # Update all components
-  azldev component update -a
+  azldev component update-upstream-commit -a
 
   # Update a single component
-  azldev component update -p curl
+  azldev component update-upstream-commit -p curl
 
   # Update components in a group
-  azldev component update -g core
+  azldev component update-upstream-commit -g core
 
   # Write generated files to a custom directory
-  azldev component update -a --upstream-commits-dir config/commits
+  azldev component update-upstream-commit -a --upstream-commits-dir config/commits
 
   # CI gate: exit 0 if commit TOMLs are current, 1 if anything would change
-  azldev component update -a --check-only -q`,
+  azldev component update-upstream-commit -a --check-only -q`,
 		RunE: azldev.RunFuncWithExtraArgs(func(env *azldev.Env, args []string) (interface{}, error) {
 			options.ComponentFilter.ComponentNamePatterns = append(
 				args, options.ComponentFilter.ComponentNamePatterns...,
@@ -276,7 +276,8 @@ func checkOnlyResult(
 			len(wouldPrune), strings.Join(wouldPrune, ", ")))
 	}
 
-	return display, fmt.Errorf("upstream commit TOML files are stale; %s. Run 'azldev component update -a' to refresh",
+	return display, fmt.Errorf("upstream commit TOML files are stale; %s. "+
+		"Run 'azldev component update-upstream-commit -a' to refresh",
 		strings.Join(parts, "; "))
 }
 

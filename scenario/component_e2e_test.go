@@ -33,7 +33,7 @@ const (
 
 	// azureLinuxBranch is the canonical azldev-managed branch in the upstream
 	// repo. HEAD of this branch is expected to be in a steady state with
-	// respect to 'azldev component update -a' and 'azldev component render -a
+	// respect to 'azldev component update-upstream-commit -a' and 'azldev component render -a
 	// --clean-stale': running either should be a no-op against a fresh clone.
 	// If these tests start failing, the most likely cause is that the upstream
 	// branch has drifted and needs a refresh — not an azldev regression — but
@@ -58,7 +58,7 @@ const (
 // determine the synthetic-commit count and the Release-tag bump); a shallow
 // (--depth=1) clone hides that history and produces a smaller bump than the
 // upstream rendered output recorded, so render idempotency tests must clone
-// with full history. 'component update' does not walk history and is fine
+// with full history. 'component update-upstream-commit' does not walk history and is fine
 // with a shallow clone.
 func runAzureLinuxIdempotencyTest(t *testing.T, azldevArgs []string, fullHistory bool) {
 	t.Helper()
@@ -160,11 +160,11 @@ echo "OK: working tree is clean after 'azldev %[3]s'"
 }
 
 // TestAzureLinuxComponentUpdateIsIdempotent verifies that running
-// 'azldev component update -a' against an upstream microsoft/azurelinux
+// 'azldev component update-upstream-commit -a' against an upstream microsoft/azurelinux
 // checkout at HEAD of [azureLinuxBranch] leaves no modifications in the
 // working tree. In other words, the generated upstream commit config in the upstream
 // branch are already fresh against the resolved upstream snapshots, and
-// 'update -a' is a no-op.
+// 'update-upstream-commit -a' is a no-op.
 //
 // Intentionally not parallel: see also [TestAzureLinuxComponentRenderIsIdempotent].
 // Both tests clone hundreds of MB and may exercise mock; running them
@@ -174,7 +174,7 @@ func TestAzureLinuxComponentUpdateIsIdempotent(t *testing.T) {
 		t.Skip("skipping long test")
 	}
 
-	runAzureLinuxIdempotencyTest(t, []string{"component", "update", "-a"}, false)
+	runAzureLinuxIdempotencyTest(t, []string{"component", "update-upstream-commit", "-a"}, false)
 }
 
 // TestAzureLinuxComponentRenderSubsetIsIdempotent is a smaller, faster variant

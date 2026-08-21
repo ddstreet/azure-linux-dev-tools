@@ -88,7 +88,7 @@ The value must be a hex string between 7 and 40 characters (a short or full git 
 
 > **Note:** Commit-pinning is intended for temporary use. Once the desired change lands in a tagged upstream release, switch back to version-based pinning or the default snapshot to keep the component aligned with the upstream distro.
 
-`azldev component update` resolves commits from the configured snapshot and writes one
+`azldev component update-upstream-commit` resolves commits from the configured snapshot and writes one
 normal component config file per upstream component under `base/upstream-commits/` by
 default. Include those generated files in the project configuration so all commands use
 the resolved commits:

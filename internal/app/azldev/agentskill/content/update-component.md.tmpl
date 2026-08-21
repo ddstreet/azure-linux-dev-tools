@@ -5,7 +5,7 @@ description: {{ printf "%q" .Description }}
 
 # Update component upstream commits
 
-`azldev comp update` (`comp` is an alias for `component`) resolves one or more
+`azldev comp update-upstream-commit` (`comp` is an alias for `component`) resolves one or more
 components at the distro snapshot and writes normal component TOML under
 `{{ .UpstreamCommitsDir }}/`.
 
@@ -13,9 +13,9 @@ The project config must include `{{ .UpstreamCommitsDir }}/*.toml` so subsequent
 commands load the generated commit pins. If `--upstream-commits-dir` selects another
 directory, update the include pattern to match.
 
-## When to run `update`
+## When to run `update-upstream-commit`
 
-| Situation | Run `update`? |
+| Situation | Run `update-upstream-commit`? |
 | --- | --- |
 | Adding a new upstream component | **Yes** — first, to generate its upstream commit TOML |
 | Finalizing overlay, build config, or metadata changes | No — these do not affect the resolved commit |
@@ -49,9 +49,9 @@ trigger an automatic release bump.
 A source-resolution change follows the same rule, using one commit followed by a
 post-render amend:
 
-1. Change the upstream distro/version or snapshot, then `azldev comp update -p <name>`; sanity-check `{{ .UpstreamCommitsDir }}/<name>.toml`.
+1. Change the upstream distro/version or snapshot, then `azldev comp update-upstream-commit -p <name>`; sanity-check `{{ .UpstreamCommitsDir }}/<name>.toml`.
 2. `azldev comp render -p <name>` — the spec body now tracks the newly resolved source. `%changelog` / `Release:` still reflect the previous source; that is expected until you commit.
-3. Iterate on overlays / patches / build config as the new source requires, re-rendering after each change. Re-run `update` only if you change a source-resolution input again.
+3. Iterate on overlays / patches / build config as the new source requires, re-rendering after each change. Re-run `update-upstream-commit` only if you change a source-resolution input again.
 4. Stage and commit all component inputs changed above with the refreshed TOML and rendered output:
 
    ```sh

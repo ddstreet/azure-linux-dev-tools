@@ -20,16 +20,16 @@ import (
 
 const testUpstreamCommitsDir = "/project/base/upstream-commits"
 
-func TestNewUpdateCmd(t *testing.T) {
-	cmd := componentcmds.NewUpdateCmd()
+func TestNewUpdateUpstreamCommitCmd(t *testing.T) {
+	cmd := componentcmds.NewUpdateUpstreamCommitCmd()
 	require.NotNil(t, cmd)
-	assert.Equal(t, "update", cmd.Use)
+	assert.Equal(t, "update-upstream-commit", cmd.Use)
 	assert.NotNil(t, cmd.RunE)
 	assert.Nil(t, cmd.Flags().Lookup("bump"))
 }
 
-func TestNewUpdateCmd_Flags(t *testing.T) {
-	cmd := componentcmds.NewUpdateCmd()
+func TestNewUpdateUpstreamCommitCmd_Flags(t *testing.T) {
+	cmd := componentcmds.NewUpdateUpstreamCommitCmd()
 
 	allFlag := cmd.Flags().Lookup("all-components")
 	require.NotNil(t, allFlag, "all-components flag should be registered")
@@ -38,10 +38,10 @@ func TestNewUpdateCmd_Flags(t *testing.T) {
 	require.NotNil(t, componentFlag, "component flag should be registered")
 }
 
-func TestUpdateCmd_NoComponents(t *testing.T) {
+func TestUpdateUpstreamCommitCmd_NoComponents(t *testing.T) {
 	testEnv := testutils.NewTestEnv(t)
 
-	cmd := componentcmds.NewUpdateCmd()
+	cmd := componentcmds.NewUpdateUpstreamCommitCmd()
 	cmd.SetArgs([]string{"nonexistent-component"})
 
 	err := cmd.ExecuteContext(testEnv.Env)
@@ -299,7 +299,7 @@ func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 	require.Error(t, err, "stale TOML must produce a non-nil error in --check-only mode")
 	assert.Contains(t, err.Error(), "stale", "error message should mention staleness")
 	assert.Contains(t, err.Error(), "curl", "error message should name the stale component")
-	assert.Contains(t, err.Error(), "azldev component update -a",
+	assert.Contains(t, err.Error(), "azldev component update-upstream-commit -a",
 		"-a-scoped run should suggest the same -a invocation to refresh")
 
 	// Results slice must be returned alongside the error so structured

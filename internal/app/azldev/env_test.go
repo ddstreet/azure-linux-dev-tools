@@ -161,7 +161,7 @@ func TestFixSuggestions(t *testing.T) {
 
 	t.Run("single suggestion does not panic", func(t *testing.T) {
 		testEnv := testutils.NewTestEnv(t)
-		testEnv.Env.AddFixSuggestion("run 'azldev component update -a'")
+		testEnv.Env.AddFixSuggestion("run 'azldev component update-upstream-commit -a'")
 		assert.NotPanics(t, func() {
 			testEnv.Env.PrintFixSuggestions()
 		})
