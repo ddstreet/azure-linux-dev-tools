@@ -3,16 +3,16 @@ name: {{ .Name }}
 description: {{ printf "%q" .Description }}
 ---
 
-# Update component upstream commits
+# Refresh component upstream commits
 
-`azldev comp update` (`comp` is an alias for `component`) resolves one or more
+`azldev comp refresh-upstream-commit` (`comp` is an alias for `component`) resolves one or more
 components at the distro snapshot and writes normal component TOML under
 `{{ .UpstreamCommitsDir }}/`.
 
 The project config must include `{{ .UpstreamCommitsDir }}/*.toml` **before**
 the component-specific TOML configuration so subsequent commands load the
 generated commit pins and the component definition supplies the remaining
-`spec` fields. If `--upstream-commits-dir` selects another directory, update
+`spec` fields. If `--upstream-commits-dir` selects another directory, change
 the include pattern to match while preserving that ordering.
 
 The command uses the fully merged component configuration. It resolves and
@@ -20,9 +20,9 @@ writes a pin only when the selected component's effective `spec.type` is
 `upstream`; for other source types, it removes any existing generated pin
 without contacting an upstream provider.
 
-## When to run `update`
+## When to run `refresh-upstream-commit`
 
-| Situation | Run `update`? |
+| Situation | Run `refresh-upstream-commit`? |
 | --- | --- |
 | Adding a new upstream component | **Yes** — first, to generate its upstream commit TOML |
 | Finalizing overlay, build config, or metadata changes | No — these do not affect the resolved commit |
@@ -48,7 +48,7 @@ git commit -m "fix(<name>): ..."
 ```
 
 Synthetic dist-git history is derived from committed upstream-commit TOML changes. Changes
-that do not update the upstream commit do not add a synthetic history entry or
+that do not refresh the upstream commit do not add a synthetic history entry or
 trigger an automatic release bump.
 
 ## Changing source resolution
@@ -56,16 +56,16 @@ trigger an automatic release bump.
 A source-resolution change follows the same rule, using one commit followed by a
 post-render amend:
 
-1. Change the upstream distro/version or snapshot, then `azldev comp update -p <name>`; sanity-check `{{ .UpstreamCommitsDir }}/<name>.toml`.
+1. Change the upstream distro/version or snapshot, then `azldev comp refresh-upstream-commit -p <name>`; sanity-check `{{ .UpstreamCommitsDir }}/<name>.toml`.
 2. `azldev comp render -p <name>` — the spec body now tracks the newly resolved source. `%changelog` / `Release:` still reflect the previous source; that is expected until you commit.
-3. Iterate on overlays / patches / build config as the new source requires, re-rendering after each change. Re-run `update` only if you change a source-resolution input again.
+3. Iterate on overlays / patches / build config as the new source requires, re-rendering after each change. Re-run `refresh-upstream-commit` only if you change a source-resolution input again.
 4. Stage and commit all component inputs changed above with the refreshed TOML and rendered output:
 
    ```sh
    git add <changed-component-config-and-source-paths> \
 	   {{ .UpstreamCommitsDir }}/<name>.toml \
 	   {{ .RenderedSpecsDir }}/<first-char>/<name>/
-   git commit -m "update(<name>): ..."
+   git commit -m "feat(<name>): refresh upstream source"
    ```
 5. `azldev comp render -p <name>` — `%changelog` / `Release:` now reflect the new commit TOML.
 6. `git add {{ .RenderedSpecsDir }}/<first-char>/<name>/`, then `git commit --amend --no-edit` so the source change and rendered output land together.

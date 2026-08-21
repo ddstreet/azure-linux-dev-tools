@@ -127,10 +127,10 @@ func TestBuildingUpstreamComponent(t *testing.T) {
 	)
 
 	// Run the build with test default configs copied into the container.
-	// component update generates the upstream commit configuration first.
+	// component refresh-upstream-commit generates the upstream commit configuration first.
 	results := buildtest.NewBuildTest(project, testComponentName,
 		projecttest.WithTestDefaultConfigs(),
-		projecttest.WithPreCommand("component", "update", "-a"),
+		projecttest.WithPreCommand("component", "refresh-upstream-commit", "-a"),
 	).Run(t)
 
 	// Make sure we got 1 SRPM.

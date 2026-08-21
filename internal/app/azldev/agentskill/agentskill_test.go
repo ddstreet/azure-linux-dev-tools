@@ -111,8 +111,8 @@ func TestSkillDocumentUsesBindings(t *testing.T) {
 	assert.Contains(t, doc, "build/specs/")
 }
 
-func TestUpdateComponentSkillStagesRenderedOutputBeforeAmend(t *testing.T) {
-	doc, err := agentskill.SkillDocument("azldev-update-component", testParams())
+func TestRefreshUpstreamCommitSkillStagesRenderedOutputBeforeAmend(t *testing.T) {
+	doc, err := agentskill.SkillDocument("azldev-refresh-upstream-commit", testParams())
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, strings.Count(doc, "git add specs/<first-char>/<name>/"),
@@ -210,7 +210,7 @@ func TestSkillsRegistry(t *testing.T) {
 
 	assert.Contains(t, names, agentskill.SkillName)
 	assert.Contains(t, names, "azldev-mock")
-	assert.Contains(t, names, "azldev-update-component")
+	assert.Contains(t, names, "azldev-refresh-upstream-commit")
 	assert.Contains(t, names, "azldev-remove-component")
 	assert.Contains(t, names, "azldev-overlays")
 	assert.Contains(t, names, "azldev-comp-toml")

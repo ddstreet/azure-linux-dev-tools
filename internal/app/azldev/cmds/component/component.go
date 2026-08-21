@@ -28,9 +28,10 @@ components defined in the project configuration.`,
 	changedOnAppInit(app, cmd)
 	diffSourcesOnAppInit(app, cmd)
 	historyOnAppInit(app, cmd)
+	legacyOnAppInit(app, cmd)
 	listOnAppInit(app, cmd)
 	prepareOnAppInit(app, cmd)
 	queryOnAppInit(app, cmd)
 	renderOnAppInit(app, cmd)
-	updateOnAppInit(app, cmd)
+	refreshUpstreamCommitOnAppInit(app, cmd)
 }

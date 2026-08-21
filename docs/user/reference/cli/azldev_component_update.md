@@ -2,65 +2,16 @@
 
 ## azldev component update
 
-Resolve and record upstream commits for components
-
-### Synopsis
-
-Resolve upstream commits for components and write normal per-component TOML configuration.
-
-For upstream components, this resolves the effective commit hash using the
-distro snapshot time, then records it as spec.upstream-commit in
-base/upstream-commits/<name>.toml by default. Include that directory's TOML
-files before component-specific TOML configuration so subsequent commands use
-the generated commit unless the component configuration explicitly overrides
-it.
-
-All TOML configuration is resolved before the source type is checked. Selected
-components whose effective spec.type is not "upstream" do not contact an
-upstream provider, and any generated upstream-commit TOML for them is removed.
-
-When updating all components (-a), orphan generated TOML files are
-automatically pruned.
-Orphan pruning is skipped when updating individual components to avoid
-accidentally removing files for components not included in the filter.
-
-The --check-only flag runs the full pipeline but does NOT write TOML files or
-prune orphans. The command exits 0 when nothing would change and exits 1 when
-any component is stale or any generated TOML would be pruned. Intended for CI gates.
+azldev component update no longer does anything and should no longer be used.
 
 ```
 azldev component update [flags]
 ```
 
-### Examples
-
-```
-  # Update all components
-  azldev component update -a
-
-  # Update a single component
-  azldev component update -p curl
-
-  # Update components in a group
-  azldev component update -g core
-
-  # Write generated files to a custom directory
-  azldev component update -a --upstream-commits-dir config/commits
-
-  # CI gate: exit 0 if commit TOMLs are current, 1 if anything would change
-  azldev component update -a --check-only -q
-```
-
 ### Options
 
 ```
-  -a, --all-components                Include all components
-      --check-only                    resolve upstream commits but do not write TOML files or prune orphans. Exits 0 when nothing would change and 1 when any component is stale (or, with --all-components, when any orphan generated TOML would be pruned). Intended for CI gates
-  -p, --component stringArray         Component name pattern
-  -g, --component-group stringArray   Component group name
-  -h, --help                          help for update
-  -s, --spec-path stringArray         Spec path
-      --upstream-commits-dir string   directory for generated per-component upstream-commit TOML files (default "base/upstream-commits")
+  -h, --help   help for update
 ```
 
 ### Options inherited from parent commands

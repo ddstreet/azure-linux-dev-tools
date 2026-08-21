@@ -17,7 +17,7 @@ const testUpstreamCommitsDir = "/project/base/upstream-commits"
 func TestSaveUpstreamCommitConfigs_WritesChangedCommit(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
-	results := []UpdateResult{{
+	results := []RefreshUpstreamCommitResult{{
 		Component:      "curl",
 		UpstreamCommit: "abc123",
 		Changed:        true,
@@ -34,7 +34,7 @@ func TestSaveUpstreamCommitConfigs_WritesChangedCommit(t *testing.T) {
 func TestSaveUpstreamCommitConfigs_SkipsUnchangedAndFailed(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
-	results := []UpdateResult{
+	results := []RefreshUpstreamCommitResult{
 		{Component: "unchanged"},
 		{Component: "errored", Changed: true, Error: "resolution failed"},
 		{Component: "skipped", Changed: true, Skipped: true, SkipReason: "cancelled"},

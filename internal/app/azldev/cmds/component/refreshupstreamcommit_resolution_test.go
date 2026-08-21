@@ -52,17 +52,17 @@ func TestUpdateAlwaysResolvesUpstreamComponent(t *testing.T) {
 	gitCalls := setupMockGitWithCounter(env, "aabbccdd11223344")
 	addUpstreamComponent(env, "curl")
 
-	options := &componentcmds.UpdateComponentOptions{
+	options := &componentcmds.RefreshUpstreamCommitOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	}
 
-	_, err := componentcmds.UpdateComponents(env.Env, options)
+	_, err := componentcmds.RefreshUpstreamCommits(env.Env, options)
 	require.NoError(t, err)
 	require.Positive(t, gitCalls.Load())
 
 	gitCalls.Store(0)
 
-	results, err := componentcmds.UpdateComponents(env.Env, options)
+	results, err := componentcmds.RefreshUpstreamCommits(env.Env, options)
 	require.NoError(t, err)
 	assert.Positive(t, gitCalls.Load(), "repeated updates must re-resolve upstream state")
 

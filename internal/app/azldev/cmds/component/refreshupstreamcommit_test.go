@@ -20,16 +20,16 @@ import (
 
 const testUpstreamCommitsDir = "/project/base/upstream-commits"
 
-func TestNewUpdateCmd(t *testing.T) {
-	cmd := componentcmds.NewUpdateCmd()
+func TestNewRefreshUpstreamCommitCmd(t *testing.T) {
+	cmd := componentcmds.NewRefreshUpstreamCommitCmd()
 	require.NotNil(t, cmd)
-	assert.Equal(t, "update", cmd.Use)
+	assert.Equal(t, "refresh-upstream-commit", cmd.Use)
 	assert.NotNil(t, cmd.RunE)
 	assert.Nil(t, cmd.Flags().Lookup("bump"))
 }
 
-func TestNewUpdateCmd_Flags(t *testing.T) {
-	cmd := componentcmds.NewUpdateCmd()
+func TestNewRefreshUpstreamCommitCmd_Flags(t *testing.T) {
+	cmd := componentcmds.NewRefreshUpstreamCommitCmd()
 
 	allFlag := cmd.Flags().Lookup("all-components")
 	require.NotNil(t, allFlag, "all-components flag should be registered")
@@ -38,10 +38,10 @@ func TestNewUpdateCmd_Flags(t *testing.T) {
 	require.NotNil(t, componentFlag, "component flag should be registered")
 }
 
-func TestUpdateCmd_NoComponents(t *testing.T) {
+func TestRefreshUpstreamCommitCmd_NoComponents(t *testing.T) {
 	testEnv := testutils.NewTestEnv(t)
 
-	cmd := componentcmds.NewUpdateCmd()
+	cmd := componentcmds.NewRefreshUpstreamCommitCmd()
 	cmd.SetArgs([]string{"nonexistent-component"})
 
 	err := cmd.ExecuteContext(testEnv.Env)
@@ -109,8 +109,8 @@ func addUpstreamComponent(env *testutils.TestEnv, name string) {
 	}
 }
 
-// TestUpdateComponents_WritesCommit exercises the full update pipeline.
-func TestUpdateComponents_WritesCommit(t *testing.T) {
+// TestRefreshUpstreamCommits_WritesCommit exercises the full refresh pipeline.
+func TestRefreshUpstreamCommits_WritesCommit(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "abc123def456"
@@ -120,9 +120,10 @@ func TestUpdateComponents_WritesCommit(t *testing.T) {
 
 	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+		})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Changed)
@@ -136,7 +137,7 @@ func TestUpdateComponents_WritesCommit(t *testing.T) {
 	assert.Equal(t, commit, savedCommit)
 }
 
-func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeCommitTOML(t *testing.T) {
+func TestRefreshUpstreamCommits_ConfigOnlyChangeDoesNotChangeCommitTOML(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "abc123def456"
@@ -146,11 +147,11 @@ func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeCommitTOML(t *testing.T) 
 
 	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	options := &componentcmds.UpdateComponentOptions{
+	options := &componentcmds.RefreshUpstreamCommitOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	}
 
-	results, err := componentcmds.UpdateComponents(env.Env, options)
+	results, err := componentcmds.RefreshUpstreamCommits(env.Env, options)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Changed)
@@ -159,7 +160,7 @@ func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeCommitTOML(t *testing.T) 
 	modifiedConfig.Build.With = []string{"ssl"}
 	env.Config.Components["curl"] = modifiedConfig
 
-	results, err = componentcmds.UpdateComponents(env.Env, options)
+	results, err = componentcmds.RefreshUpstreamCommits(env.Env, options)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
@@ -170,8 +171,8 @@ func TestUpdateComponents_ConfigOnlyChangeDoesNotChangeCommitTOML(t *testing.T) 
 	assert.Equal(t, commit, savedCommit)
 }
 
-// TestUpdateComponents_MultipleComponents tests update with multiple components.
-func TestUpdateComponents_MultipleComponents(t *testing.T) {
+// TestRefreshUpstreamCommits_MultipleComponents tests refreshing multiple components.
+func TestRefreshUpstreamCommits_MultipleComponents(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "multi-commit-hash"
@@ -182,9 +183,10 @@ func TestUpdateComponents_MultipleComponents(t *testing.T) {
 
 	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+		})
 	require.NoError(t, err)
 
 	// Should have results for both (may include skipped too).
@@ -211,7 +213,7 @@ func TestUpdateComponents_MultipleComponents(t *testing.T) {
 	assert.Equal(t, commit, bashCommit)
 }
 
-func TestUpdateComponents_LocalComponentDoesNotWriteCommitTOML(t *testing.T) {
+func TestRefreshUpstreamCommits_LocalComponentDoesNotWriteCommitTOML(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
@@ -224,9 +226,10 @@ func TestUpdateComponents_LocalComponentDoesNotWriteCommitTOML(t *testing.T) {
 
 	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+		})
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
@@ -236,7 +239,7 @@ func TestUpdateComponents_LocalComponentDoesNotWriteCommitTOML(t *testing.T) {
 	assert.False(t, exists)
 }
 
-func TestUpdateComponents_NonUpstreamComponentRemovesGeneratedCommitTOML(t *testing.T) {
+func TestRefreshUpstreamCommits_NonUpstreamComponentRemovesGeneratedCommitTOML(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
@@ -250,11 +253,12 @@ func TestUpdateComponents_NonUpstreamComponentRemovesGeneratedCommitTOML(t *test
 	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 	require.NoError(t, store.Save("local-pkg", "stale-commit"))
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{
-			ComponentNamePatterns: []string{"local-pkg"},
-		},
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{
+				ComponentNamePatterns: []string{"local-pkg"},
+			},
+		})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "local-pkg", results[0].Component)
@@ -266,7 +270,7 @@ func TestUpdateComponents_NonUpstreamComponentRemovesGeneratedCommitTOML(t *test
 	assert.False(t, exists)
 }
 
-func TestUpdateComponents_CheckOnlyDetectsNonUpstreamGeneratedCommitTOML(t *testing.T) {
+func TestRefreshUpstreamCommits_CheckOnlyDetectsNonUpstreamGeneratedCommitTOML(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	env.Config.Components["local-pkg"] = projectconfig.ComponentConfig{
@@ -280,12 +284,13 @@ func TestUpdateComponents_CheckOnlyDetectsNonUpstreamGeneratedCommitTOML(t *test
 	store := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 	require.NoError(t, store.Save("local-pkg", "stale-commit"))
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{
-			ComponentNamePatterns: []string{"local-pkg"},
-		},
-		CheckOnly: true,
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{
+				ComponentNamePatterns: []string{"local-pkg"},
+			},
+			CheckOnly: true,
+		})
 	require.ErrorContains(t, err, "local-pkg")
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Changed)
@@ -296,12 +301,12 @@ func TestUpdateComponents_CheckOnlyDetectsNonUpstreamGeneratedCommitTOML(t *test
 	assert.True(t, exists, "--check-only must not remove generated TOML files")
 }
 
-// TestUpdateComponents_AdvancesStaleCommit is a regression test for the case
+// TestRefreshUpstreamCommits_AdvancesStaleCommit is a regression test for the case
 // where a generated pin is at commit A and the snapshot resolves to
 // commit B must result in B being written (not A echoed back). Without
 // clearing the configured pin before re-resolution, source resolution would
 // return A and the generated TOML would never advance.
-func TestUpdateComponents_AdvancesStaleCommit(t *testing.T) {
+func TestRefreshUpstreamCommits_AdvancesStaleCommit(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const initialCommit = "initial-aaa111"
@@ -317,14 +322,15 @@ func TestUpdateComponents_AdvancesStaleCommit(t *testing.T) {
 	// Mock git now resolves to a NEW commit — upstream moved.
 	setupMockGit(env, advancedCommit)
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+		})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
 	assert.Equal(t, advancedCommit, results[0].UpstreamCommit,
-		"update must re-resolve and return the advanced commit, not echo the configured one")
+		"refresh must re-resolve and return the advanced commit, not echo the configured one")
 	assert.True(t, results[0].Changed, "generated commit advanced")
 	assert.Equal(t, initialCommit, results[0].PreviousCommit,
 		"PreviousCommit should track the prior generated TOML")
@@ -336,9 +342,9 @@ func TestUpdateComponents_AdvancesStaleCommit(t *testing.T) {
 	assert.Equal(t, advancedCommit, updatedCommit)
 }
 
-// TestUpdateComponents_CheckOnly_StaleReturnsError verifies that --check-only
+// TestRefreshUpstreamCommits_CheckOnly_StaleReturnsError verifies that '--check-only'
 // returns a non-nil error when a generated commit TOML is stale without writing.
-func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
+func TestRefreshUpstreamCommits_CheckOnly_StaleReturnsError(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const initialCommit = "initial-aaa111"
@@ -352,14 +358,15 @@ func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 	addUpstreamComponent(env, "curl")
 	setupMockGit(env, advancedCommit)
 
-	results, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-		CheckOnly:       true,
-	})
+	results, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+			CheckOnly:       true,
+		})
 	require.Error(t, err, "stale TOML must produce a non-nil error in --check-only mode")
 	assert.Contains(t, err.Error(), "stale", "error message should mention staleness")
 	assert.Contains(t, err.Error(), "curl", "error message should name the stale component")
-	assert.Contains(t, err.Error(), "azldev component update -a",
+	assert.Contains(t, err.Error(), "azldev component refresh-upstream-commit -a",
 		"-a-scoped run should suggest the same -a invocation to refresh")
 
 	// Results slice must be returned alongside the error so structured
@@ -385,9 +392,9 @@ func TestUpdateComponents_CheckOnly_StaleReturnsError(t *testing.T) {
 	assert.Equal(t, initialCommit, savedCommit)
 }
 
-// TestUpdateComponents_CheckOnly_FreshReturnsNil verifies that --check-only
+// TestRefreshUpstreamCommits_CheckOnly_FreshReturnsNil verifies that '--check-only'
 // returns nil when all generated commit TOMLs are fresh.
-func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
+func TestRefreshUpstreamCommits_CheckOnly_FreshReturnsNil(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "fresh-commit-aaa"
@@ -396,12 +403,12 @@ func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
 	addUpstreamComponent(env, "curl")
 	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	options := &componentcmds.UpdateComponentOptions{
+	options := &componentcmds.RefreshUpstreamCommitOptions{
 		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
 	}
 
-	// Phase 1: populate the generated TOML with a real update run.
-	_, err := componentcmds.UpdateComponents(env.Env, options)
+	// Phase 1: populate the generated TOML with a real refresh run.
+	_, err := componentcmds.RefreshUpstreamCommits(env.Env, options)
 	require.NoError(t, err)
 
 	freshStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
@@ -411,7 +418,7 @@ func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
 
 	// Phase 2: --check-only against the now-fresh TOML. Must return nil.
 	options.CheckOnly = true
-	_, err = componentcmds.UpdateComponents(env.Env, options)
+	_, err = componentcmds.RefreshUpstreamCommits(env.Env, options)
 	require.NoError(t, err, "fresh TOMLs must return nil error in --check-only mode")
 
 	// The configured commit must remain unchanged.
@@ -422,10 +429,10 @@ func TestUpdateComponents_CheckOnly_FreshReturnsNil(t *testing.T) {
 	assert.Equal(t, before, after)
 }
 
-// TestUpdateComponents_CheckOnly_DetectsOrphans verifies that --check-only
+// TestRefreshUpstreamCommits_CheckOnly_DetectsOrphans verifies that '--check-only'
 // returns an error when an orphan generated TOML would be pruned by a normal run,
 // and that the orphan is NOT actually deleted.
-func TestUpdateComponents_CheckOnly_DetectsOrphans(t *testing.T) {
+func TestRefreshUpstreamCommits_CheckOnly_DetectsOrphans(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 
 	const commit = "fresh-commit-aaa"
@@ -434,23 +441,25 @@ func TestUpdateComponents_CheckOnly_DetectsOrphans(t *testing.T) {
 	addUpstreamComponent(env, "curl")
 	require.NoError(t, fileutils.MkdirAll(env.TestFS, testUpstreamCommitsDir))
 
-	// First, do a real update so curl's TOML is fresh -- isolates the orphan as
+	// First, do a real refresh so curl's TOML is fresh; this isolates the orphan as
 	// the only thing --check-only should flag.
-	_, err := componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-	})
+	_, err := componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+		})
 	require.NoError(t, err)
 
-	// Plant an orphan TOML AFTER the update -- a normal update would have
+	// Plant an orphan TOML after the refresh; a normal refresh would have
 	// pruned it. The orphan does NOT correspond to any component in config.
 	preStore := upstreamcommit.NewStore(env.TestFS, testUpstreamCommitsDir)
 	require.NoError(t, preStore.Save("removed-pkg", "orphan-commit"))
 
 	// --check-only must report the orphan and not delete it.
-	_, err = componentcmds.UpdateComponents(env.Env, &componentcmds.UpdateComponentOptions{
-		ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
-		CheckOnly:       true,
-	})
+	_, err = componentcmds.RefreshUpstreamCommits(
+		env.Env, &componentcmds.RefreshUpstreamCommitOptions{
+			ComponentFilter: components.ComponentFilter{IncludeAllComponents: true},
+			CheckOnly:       true,
+		})
 	require.Error(t, err, "orphan TOML must produce an error in --check-only mode")
 	assert.Contains(t, err.Error(), "orphan")
 	assert.Contains(t, err.Error(), "removed-pkg")

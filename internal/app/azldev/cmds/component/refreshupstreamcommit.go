@@ -20,8 +20,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// UpdateComponentOptions holds options for the component update command.
-type UpdateComponentOptions struct {
+// RefreshUpstreamCommitOptions holds options for the component refresh-upstream-commit command.
+type RefreshUpstreamCommitOptions struct {
 	ComponentFilter components.ComponentFilter
 	// UpstreamCommitsDir is the project-relative or absolute directory containing
 	// generated per-component TOML files.
@@ -33,17 +33,17 @@ type UpdateComponentOptions struct {
 
 const defaultUpstreamCommitsDir = "base/upstream-commits"
 
-func updateOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
-	parentCmd.AddCommand(NewUpdateCmd())
+func refreshUpstreamCommitOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
+	parentCmd.AddCommand(NewRefreshUpstreamCommitCmd())
 }
 
-// NewUpdateCmd constructs a [cobra.Command] for the "component update" CLI subcommand.
-func NewUpdateCmd() *cobra.Command {
-	options := &UpdateComponentOptions{}
+// NewRefreshUpstreamCommitCmd constructs the "component refresh-upstream-commit" command.
+func NewRefreshUpstreamCommitCmd() *cobra.Command {
+	options := &RefreshUpstreamCommitOptions{}
 	options.UpstreamCommitsDir = defaultUpstreamCommitsDir
 
 	cmd := &cobra.Command{
-		Use:   "update",
+		Use:   "refresh-upstream-commit",
 		Short: "Resolve and record upstream commits for components",
 		Long: `Resolve upstream commits for components and write normal per-component TOML configuration.
 
@@ -66,26 +66,26 @@ accidentally removing files for components not included in the filter.
 The --check-only flag runs the full pipeline but does NOT write TOML files or
 prune orphans. The command exits 0 when nothing would change and exits 1 when
 any component is stale or any generated TOML would be pruned. Intended for CI gates.`,
-		Example: `  # Update all components
-  azldev component update -a
+		Example: `  # Refresh all components
+  azldev component refresh-upstream-commit -a
 
-  # Update a single component
-  azldev component update -p curl
+  # Refresh a single component
+  azldev component refresh-upstream-commit -p curl
 
-  # Update components in a group
-  azldev component update -g core
+  # Refresh components in a group
+  azldev component refresh-upstream-commit -g core
 
   # Write generated files to a custom directory
-  azldev component update -a --upstream-commits-dir config/commits
+  azldev component refresh-upstream-commit -a --upstream-commits-dir config/commits
 
   # CI gate: exit 0 if commit TOMLs are current, 1 if anything would change
-  azldev component update -a --check-only -q`,
+  azldev component refresh-upstream-commit -a --check-only -q`,
 		RunE: azldev.RunFuncWithExtraArgs(func(env *azldev.Env, args []string) (interface{}, error) {
 			options.ComponentFilter.ComponentNamePatterns = append(
 				args, options.ComponentFilter.ComponentNamePatterns...,
 			)
 
-			return UpdateComponents(env, options)
+			return RefreshUpstreamCommits(env, options)
 		}),
 		ValidArgsFunction: components.GenerateComponentNameCompletions,
 	}
@@ -105,8 +105,8 @@ any component is stale or any generated TOML would be pruned. Intended for CI ga
 	return cmd
 }
 
-// UpdateResult is the per-component output for the update command.
-type UpdateResult struct {
+// RefreshUpstreamCommitResult is the per-component output for the refresh command.
+type RefreshUpstreamCommitResult struct {
 	Component      string `json:"component"                table:",sortkey"`
 	UpstreamCommit string `json:"upstreamCommit,omitempty"`
 	PreviousCommit string `json:"previousCommit,omitempty" table:"-"`
@@ -117,9 +117,11 @@ type UpdateResult struct {
 	Error          string `json:"error,omitempty"          table:",omitempty"`
 }
 
-// UpdateComponents resolves upstream commits for all selected components and
+// RefreshUpstreamCommits resolves upstream commits for all selected components and
 // writes the results to per-component TOML files.
-func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]UpdateResult, error) {
+func RefreshUpstreamCommits(
+	env *azldev.Env, options *RefreshUpstreamCommitOptions,
+) ([]RefreshUpstreamCommitResult, error) {
 	resolver := components.NewResolver(env)
 
 	resolved, err := resolver.FindComponents(&options.ComponentFilter)
@@ -133,7 +135,7 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 	}
 
 	if env.ProjectDir() == "" {
-		return nil, errors.New("no project directory configured; cannot update upstream commit TOML files")
+		return nil, errors.New("no project directory configured; cannot refresh upstream commit TOML files")
 	}
 
 	commitDir := options.UpstreamCommitsDir
@@ -160,11 +162,11 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 
 	// Don't save if the context was cancelled (Ctrl+C).
 	if env.Context().Err() != nil {
-		return results, errors.New("update cancelled; upstream commit TOML files not updated")
+		return results, errors.New("refresh cancelled; upstream commit TOML files not updated")
 	}
 
 	// Check results and bail on errors before saving.
-	if err := checkUpdateErrors(results); err != nil {
+	if err := checkRefreshErrors(results); err != nil {
 		return filterDisplayResults(results), err
 	}
 
@@ -177,7 +179,7 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 	// run that wrote nothing, and the structured error returned below already
 	// names every affected component.
 	if !options.CheckOnly {
-		logUpdateSummary(results)
+		logRefreshSummary(results)
 	}
 
 	// Prune orphan generated TOML files when updating all components.
@@ -203,10 +205,10 @@ func UpdateComponents(env *azldev.Env, options *UpdateComponentOptions) ([]Updat
 func inspectSelectedComponents(
 	comps []components.Component,
 	store *upstreamcommit.Store,
-) ([]components.Component, []UpdateResult, error) {
+) ([]components.Component, []RefreshUpstreamCommitResult, error) {
 	upstream := make([]components.Component, 0, len(comps))
 
-	var results []UpdateResult
+	var results []RefreshUpstreamCommitResult
 
 	for _, comp := range comps {
 		if comp.GetConfig().Spec.SourceType == projectconfig.SpecSourceTypeUpstream {
@@ -224,7 +226,7 @@ func inspectSelectedComponents(
 		}
 
 		if exists {
-			results = append(results, UpdateResult{
+			results = append(results, RefreshUpstreamCommitResult{
 				Component: comp.GetName(),
 				Changed:   true,
 				Removed:   true,
@@ -235,7 +237,9 @@ func inspectSelectedComponents(
 	return upstream, results, nil
 }
 
-func excludePendingRemovals(orphans []string, results []UpdateResult) []string {
+func excludePendingRemovals(
+	orphans []string, results []RefreshUpstreamCommitResult,
+) []string {
 	removed := make(map[string]struct{})
 
 	for idx := range results {
@@ -262,7 +266,7 @@ func excludePendingRemovals(orphans []string, results []UpdateResult) []string {
 func handleOrphanConfigs(
 	store *upstreamcommit.Store,
 	comps []components.Component,
-	options *UpdateComponentOptions,
+	options *RefreshUpstreamCommitOptions,
 ) ([]string, error) {
 	if !options.ComponentFilter.IncludeAllComponents {
 		return nil, nil
@@ -302,7 +306,7 @@ func handleOrphanConfigs(
 	return nil, nil
 }
 
-// checkOnlyResult inspects the results of a --check-only update run and
+// checkOnlyResult inspects the results of a '--check-only' refresh run and
 // returns (results, error) when any component would change or any generated TOML
 // would be pruned. The error names the affected components so CI logs are
 // useful at a glance. Returns (results, nil) when nothing would change --
@@ -310,8 +314,8 @@ func handleOrphanConfigs(
 // consumers (e.g. -O json) retain the per-component data the pipeline just
 // computed.
 func checkOnlyResult(
-	results []UpdateResult, wouldPrune []string,
-) ([]UpdateResult, error) {
+	results []RefreshUpstreamCommitResult, wouldPrune []string,
+) ([]RefreshUpstreamCommitResult, error) {
 	var changed []string
 
 	for idx := range results {
@@ -337,13 +341,14 @@ func checkOnlyResult(
 			len(wouldPrune), strings.Join(wouldPrune, ", ")))
 	}
 
-	return display, fmt.Errorf("upstream commit TOML files are stale; %s. Run 'azldev component update -a' to refresh",
+	return display, fmt.Errorf("upstream commit TOML files are stale; %s. "+
+		"Run 'azldev component refresh-upstream-commit -a' to refresh",
 		strings.Join(parts, "; "))
 }
 
 // saveUpstreamCommitConfigs writes TOML files for changed upstream commits.
 func saveUpstreamCommitConfigs(
-	store *upstreamcommit.Store, results []UpdateResult, checkOnly bool,
+	store *upstreamcommit.Store, results []RefreshUpstreamCommitResult, checkOnly bool,
 ) error {
 	saved := make([]string, 0, len(results))
 
@@ -362,7 +367,7 @@ func saveUpstreamCommitConfigs(
 			continue
 		}
 
-		written, err := updateComponentConfig(store, &results[idx], checkOnly)
+		written, err := applyRefreshResult(store, &results[idx], checkOnly)
 		if err != nil {
 			retErr = err
 
@@ -377,10 +382,10 @@ func saveUpstreamCommitConfigs(
 	return nil
 }
 
-// updateComponentConfig writes one changed TOML file. The returned 'written'
+// applyRefreshResult writes one changed TOML file. The returned 'written'
 // flag is always false in check-only mode.
-func updateComponentConfig(
-	store *upstreamcommit.Store, result *UpdateResult, checkOnly bool,
+func applyRefreshResult(
+	store *upstreamcommit.Store, result *RefreshUpstreamCommitResult, checkOnly bool,
 ) (bool, error) {
 	if !result.Changed {
 		return false, nil
@@ -412,9 +417,9 @@ func updateComponentConfig(
 	return true, nil
 }
 
-// checkUpdateErrors returns an error if any component failed to resolve.
-// Does NOT log a summary — call [logUpdateSummary] after saves are complete.
-func checkUpdateErrors(results []UpdateResult) error {
+// checkRefreshErrors returns an error if any component failed to resolve.
+// Does NOT log a summary; call [logRefreshSummary] after saves are complete.
+func checkRefreshErrors(results []RefreshUpstreamCommitResult) error {
 	var failedNames []string
 
 	for idx := range results {
@@ -424,7 +429,7 @@ func checkUpdateErrors(results []UpdateResult) error {
 	}
 
 	if len(failedNames) > 0 {
-		slog.Error("Update failed",
+		slog.Error("Refresh failed",
 			"total", len(results),
 			"errors", len(failedNames))
 
@@ -436,8 +441,8 @@ func checkUpdateErrors(results []UpdateResult) error {
 	return nil
 }
 
-// logUpdateSummary logs the final update summary.
-func logUpdateSummary(results []UpdateResult) {
+// logRefreshSummary logs the final refresh summary.
+func logRefreshSummary(results []RefreshUpstreamCommitResult) {
 	var changed, skipped, upToDate int
 
 	for idx := range results {
@@ -451,7 +456,7 @@ func logUpdateSummary(results []UpdateResult) {
 		}
 	}
 
-	slog.Info("Update complete",
+	slog.Info("Refresh complete",
 		"total", len(results),
 		"changed", changed,
 		"upToDate", upToDate,
@@ -463,8 +468,10 @@ func logUpdateSummary(results []UpdateResult) {
 // excluded — they represent the common "nothing to do" case and would dominate
 // the output. Errored entries are kept so the user can see what failed when
 // the command exits non-zero via the partial-results-on-error path.
-func filterDisplayResults(results []UpdateResult) []UpdateResult {
-	var tableResults []UpdateResult
+func filterDisplayResults(
+	results []RefreshUpstreamCommitResult,
+) []RefreshUpstreamCommitResult {
+	var tableResults []RefreshUpstreamCommitResult
 
 	for idx := range results {
 		if results[idx].Changed || results[idx].Skipped || results[idx].Error != "" {
@@ -479,8 +486,8 @@ func resolveUpstreamCommitsParallel(
 	env *azldev.Env,
 	comps []components.Component,
 	store *upstreamcommit.Store,
-) []UpdateResult {
-	results := make([]UpdateResult, len(comps))
+) []RefreshUpstreamCommitResult {
+	results := make([]RefreshUpstreamCommitResult, len(comps))
 
 	progressEvent := env.StartEvent("Resolving upstream commits", "count", len(comps))
 	defer progressEvent.End()
@@ -539,10 +546,10 @@ func resolveAndRecordCommit(
 	cancel context.CancelFunc,
 	comp components.Component,
 	store *upstreamcommit.Store,
-	result *UpdateResult,
+	result *RefreshUpstreamCommitResult,
 ) {
 	// Clear the loaded pin before asking the provider to resolve. Render and
-	// build honor Spec.UpstreamCommit for reproducibility, but update is the
+	// build honor Spec.UpstreamCommit for reproducibility, but refresh is the
 	// operation that advances that pin: leaving the old value in place would
 	// make the provider return it immediately and a newer snapshot could never
 	// move the component forward.
@@ -564,7 +571,9 @@ func resolveAndRecordCommit(
 }
 
 // checkConfigChanged compares the resolved commit with the generated TOML.
-func checkConfigChanged(store *upstreamcommit.Store, componentName string, result *UpdateResult) {
+func checkConfigChanged(
+	store *upstreamcommit.Store, componentName string, result *RefreshUpstreamCommitResult,
+) {
 	existingCommit, exists, loadErr := store.Get(componentName)
 	if loadErr != nil {
 		result.Error = fmt.Sprintf("loading upstream commit TOML: %v", loadErr)

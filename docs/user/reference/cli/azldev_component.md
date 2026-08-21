@@ -46,6 +46,7 @@ components defined in the project configuration.
 * [azldev component list](azldev_component_list.md)	 - List components in this project
 * [azldev component prepare-sources](azldev_component_prepare-sources.md)	 - Prepare buildable sources for components
 * [azldev component query](azldev_component_query.md)	 - Query info from locally rendered component specs
+* [azldev component refresh-upstream-commit](azldev_component_refresh-upstream-commit.md)	 - Resolve and record upstream commits for components
 * [azldev component render](azldev_component_render.md)	 - Render post-overlay specs and sidecar files to a checked-in directory
-* [azldev component update](azldev_component_update.md)	 - Resolve and record upstream commits for components
+* [azldev component update](azldev_component_update.md)	 - azldev component update no longer does anything and should no longer be used.
 

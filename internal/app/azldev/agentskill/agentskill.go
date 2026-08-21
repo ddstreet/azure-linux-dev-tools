@@ -65,7 +65,7 @@ var skills = []Skill{
 			"Explains how to use the azldev CLI to build a distro from TOML config, including the core " +
 			"concepts (components, overlays, distros, rendered specs, upstream commit config), running azldev (repo root or " +
 			"-C, plus the -q and -O json flags), the common commands, and where to go for each workflow. " +
-			"Triggers include azldev, comp build, comp render, comp update, build a component, add a " +
+			"Triggers include azldev, comp build, comp render, comp refresh-upstream-commit, build a component, add a " +
 			"component, distro config.",
 		bodyTemplate: "azldev.md.tmpl",
 	},
@@ -79,14 +79,14 @@ var skills = []Skill{
 		bodyTemplate: "mock.md.tmpl",
 	},
 	{
-		Name: "azldev-update-component",
+		Name: "azldev-refresh-upstream-commit",
 		Description: "Read this before finalizing a component change, changing source resolution, or " +
 			"editing generated upstream commit TOML by hand. Explains how to refresh commits with " +
-			"'azldev comp update', covering when to run update versus render, the " +
-			"update/render/commit/re-render/amend workflow, and per-component versus -a refresh. Triggers " +
-			"include comp update, refresh upstream commit, bump pin, change snapshot, upstream distro, commit drift, " +
-			"version bump, finalize component.",
-		bodyTemplate: "update-component.md.tmpl",
+			"'azldev comp refresh-upstream-commit', covering when to refresh versus render, the " +
+			"update/render/commit/re-render/amend workflow, and per-component versus -a refresh. " +
+			"Triggers include comp refresh-upstream-commit, refresh upstream commit, bump pin, change snapshot, " +
+			"upstream distro, commit drift, version bump, finalize component.",
+		bodyTemplate: "refresh-upstream-commit.md.tmpl",
 	},
 	{
 		Name: "azldev-remove-component",
@@ -223,7 +223,7 @@ var instructions = []Instruction{
 		ApplyTo: ConfigGlob,
 		Description: "This repo is an azldev distro project (azldev.toml present). Before running azldev " +
 			"or editing its config, load the azldev skill; do not guess azldev's commands or config. " +
-			"Triggers include azldev, comp build, comp render, comp update, build a component, add a " +
+			"Triggers include azldev, comp build, comp render, comp refresh-upstream-commit, build a component, add a " +
 			"component, distro config.",
 		Title: "Working with azldev projects",
 		Intro: "This repository is an azldev distro project; its top-level configuration lives in `azldev.toml`.",
@@ -246,7 +246,7 @@ var instructions = []Instruction{
 			{Skill: "azldev-add-component", Purpose: "to add a new component"},
 			{Skill: "azldev-overlays", Purpose: "to add or change overlays"},
 			{Skill: "azldev-overlay-metadata", Purpose: "to annotate an overlay's category and upstream status"},
-			{Skill: "azldev-update-component", Purpose: "to refresh a component's upstream commit"},
+			{Skill: "azldev-refresh-upstream-commit", Purpose: "to refresh a component's upstream commit"},
 			{Skill: "azldev-remove-component", Purpose: "to remove a component"},
 		},
 	},
@@ -263,7 +263,7 @@ var instructions = []Instruction{
 		Skills: []SkillPointer{
 			{Skill: "azldev-comp-toml", Purpose: "for the component TOML format"},
 			{Skill: "azldev-overlays", Purpose: "to change generated output via overlays"},
-			{Skill: "azldev-update-component", Purpose: "to refresh and finalize a component"},
+			{Skill: "azldev-refresh-upstream-commit", Purpose: "to refresh and finalize a component"},
 		},
 	},
 }
