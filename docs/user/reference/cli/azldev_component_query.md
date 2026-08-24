@@ -2,45 +2,16 @@
 
 ## azldev component query
 
-Query info from locally rendered component specs
-
-### Synopsis
-
-Query detailed information for components from their locally rendered specs.
-
-This command reads the post-overlay specs from the project's rendered-specs-dir
-(produced by 'azldev component render') and runs rpmspec against them in a
-single shared mock chroot, batching all specs into one chroot invocation with
-parallel per-spec processing. For each component, it reports the source NEVR
-and the list of binary subpackages the spec would produce when built.
-
-The rendered-specs-dir must exist on disk; if it doesn't, run
-'azldev component render' first. Components that previously failed to render
-(those with a RENDER_FAILED marker file) are skipped with a warning.
+azldev component query no longer does anything and should no longer be used.
 
 ```
 azldev component query [flags]
 ```
 
-### Examples
-
-```
-  # Query a single component
-  azldev component query -p curl
-
-  # Query with JSON output
-  azldev component query -p bash -q -O json
-```
-
 ### Options
 
 ```
-  -a, --all-components                Include all components
-      --arch arch                     Target architecture passed to rpmspec via --target (x86_64, aarch64). Defaults to x86_64. Specs that ExclusiveArch/ExcludeArch-exclude the target are emitted with only the component name populated rather than as errors. (default x86_64)
-  -p, --component stringArray         Component name pattern
-  -g, --component-group stringArray   Component group name
-  -h, --help                          help for query
-  -s, --spec-path stringArray         Spec path
+  -h, --help   help for query
 ```
 
 ### Options inherited from parent commands

@@ -30,12 +30,6 @@ func createMockProcessor(env *azldev.Env) *sources.MockProcessor {
 	return newMockProcessor(env, "", mockPackagesForRender())
 }
 
-// createQueryMockProcessor creates a [sources.MockProcessor] with the packages
-// needed for querying specs.
-func createQueryMockProcessor(env *azldev.Env) *sources.MockProcessor {
-	return newMockProcessor(env, "", mockPackagesForQuery())
-}
-
 // createBuildMockProcessor creates a [sources.MockProcessor] for the build
 // command. Unlike render, build creates a per-component build chroot from the
 // same project mock config, and scrubs it after each component. Isolating the

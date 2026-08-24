@@ -262,9 +262,8 @@ type runBatchScriptOptions struct {
 // emit "PROGRESS <i>/<total> <name>" lines and write a results file), and
 // returns the raw results bytes.
 //
-// This is the shared scaffolding for BatchProcess (rendering) and
-// BatchQuerySpecs (querying). Per-operation concerns (input/result shape,
-// embedded script, result parsing) live in the callers.
+// This is the shared scaffolding for BatchProcess. Per-operation concerns
+// (input/result shape, embedded script, result parsing) live in the caller.
 //
 
 func (p *MockProcessor) runBatchScript(

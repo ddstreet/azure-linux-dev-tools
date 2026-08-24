@@ -119,6 +119,15 @@ func TestRefreshUpstreamCommitSkillStagesRenderedOutputBeforeAmend(t *testing.T)
 		"the source-resolution workflow must stage the post-commit render")
 }
 
+func TestSkillsDoNotReferenceQueryCommand(t *testing.T) {
+	for _, skill := range agentskill.Skills() {
+		doc, err := agentskill.SkillDocument(skill.Name, testParams())
+		require.NoError(t, err)
+		assert.NotContains(t, doc, "azldev comp query")
+		assert.NotContains(t, doc, "azldev component query")
+	}
+}
+
 func TestSkillFrontmatterInvariants(t *testing.T) {
 	layout := agentskill.DefaultLayout()
 

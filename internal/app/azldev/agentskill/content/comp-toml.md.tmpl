@@ -102,10 +102,11 @@ the rare spec whose `Source`/`Patch` filenames use macros the filter cannot expa
 
 ## Review checklist
 
-Start with `azldev comp list -p <name> -q -O json`, then use
-`azldev comp query -p <name> -q -O json` when the review needs parsed spec details.
-For a change review, focus on the diff while checking enough surrounding context to
-ensure it fits the component and repository conventions.
+Start with `azldev comp list -p <name> -q -O json`. When the review needs spec
+details, inspect the rendered spec under
+`{{ .RenderedSpecsDir }}/<first-char>/<name>/`. For a change review, focus on
+the diff while checking enough surrounding context to ensure it fits the
+component and repository conventions.
 
 - **Organization:** The component follows the repository's inline-versus-dedicated-file
   convention; its name matches upstream or sets `spec.upstream-name`; no stale or

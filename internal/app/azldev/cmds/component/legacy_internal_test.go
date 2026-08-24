@@ -37,6 +37,12 @@ func TestLegacyCommandsAreHiddenNoOps(t *testing.T) {
 			args:     []string{"curl"},
 			expected: legacyHistoryMessage,
 		},
+		{
+			name:     "query",
+			command:  "query",
+			args:     []string{"-p", "curl", "--arch", "aarch64", "-O", "json"},
+			expected: legacyQueryMessage,
+		},
 	}
 
 	for _, test := range tests {

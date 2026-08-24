@@ -18,8 +18,8 @@ func OnAppInit(app *azldev.App) {
 
 Components are the primary unit of packaging — each corresponds to exactly one
 RPM spec file. Building a component results in producing one or more RPM packages.
-Use subcommands to add, list, query, build, and prepare sources for
-components defined in the project configuration.`,
+Use subcommands to add, list, build, and prepare sources for components defined
+in the project configuration.`,
 	}
 
 	app.AddTopLevelCommand(cmd)
@@ -30,7 +30,6 @@ components defined in the project configuration.`,
 	legacyOnAppInit(app, cmd)
 	listOnAppInit(app, cmd)
 	prepareOnAppInit(app, cmd)
-	queryOnAppInit(app, cmd)
 	renderOnAppInit(app, cmd)
 	refreshUpstreamCommitOnAppInit(app, cmd)
 }
