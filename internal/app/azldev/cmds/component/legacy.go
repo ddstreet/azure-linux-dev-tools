@@ -9,12 +9,14 @@ import (
 )
 
 const (
-	legacyUpdateMessage = "azldev component update no longer does anything and should no longer be used."
+	legacyUpdateMessage  = "azldev component update no longer does anything and should no longer be used."
+	legacyHistoryMessage = "azldev component history no longer does anything and should no longer be used."
 )
 
 func legacyOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
 	parentCmd.AddCommand(
 		newLegacyNoOpCmd("update", nil, legacyUpdateMessage),
+		newLegacyNoOpCmd("history", []string{"hist"}, legacyHistoryMessage),
 	)
 }
 

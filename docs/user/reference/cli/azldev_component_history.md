@@ -2,54 +2,16 @@
 
 ## azldev component history
 
-Report per-component change activity and customization detail
-
-### Synopsis
-
-Report three independent change-activity signals per component:
-
-  - toml-commits:    commits to the component's source TOML file
-  - customizations:  count of explicit customization items in the config
-  - upstream-commit-changes: commits that changed the generated upstream-commit TOML
-
-Use this to find which packages get the most attention (for documentation,
-review prioritization, or refactoring planning).
-
-When a component shares its source TOML with other components (e.g., a bare
-entry in a shared components.toml), the toml-commit count is coarse and the
-component is marked 'toml-shared'. Use --shared=omit to drop those rows.
-
-When exactly one component is selected the customization items are printed
-inline below the row, showing kind, value and description — useful for
-hand-picking entries to document.
+azldev component history no longer does anything and should no longer be used.
 
 ```
 azldev component history [flags]
 ```
 
-### Examples
-
-```
-  # Heatmap of an entire project
-  azldev component history -a
-
-  # JSON for downstream tooling
-  azldev component history -a -O json
-
-  # Drill into a single component (auto-expands customization details)
-  azldev component history bash
-```
-
 ### Options
 
 ```
-  -a, --all-components                Include all components
-  -p, --component stringArray         Component name pattern
-  -g, --component-group stringArray   Component group name
-  -h, --help                          help for history
-      --include-bare                  Include components with zero customizations in the output. By default they are hidden -- their config inherits everything from defaults, and computing their git metrics is the dominant cost on large projects.
-      --shared string                 How to report rows for components that share a TOML file with others: show (keep row, count is coarse), omit (drop row). (default "show")
-  -s, --spec-path stringArray         Spec path
+  -h, --help   help for history
 ```
 
 ### Options inherited from parent commands

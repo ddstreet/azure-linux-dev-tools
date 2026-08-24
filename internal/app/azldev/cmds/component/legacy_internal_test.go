@@ -12,20 +12,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLegacyUpdateCommandIsHiddenNoOp(t *testing.T) {
-	parent := &cobra.Command{Use: "component"}
-	legacyOnAppInit(nil, parent)
+func TestLegacyCommandsAreHiddenNoOps(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		args     []string
+		expected string
+	}{
+		{
+			name:     "update",
+			command:  "update",
+			args:     []string{"-a", "--bump", "curl"},
+			expected: legacyUpdateMessage,
+		},
+		{
+			name:     "history",
+			command:  "history",
+			args:     []string{"-a", "--include-bare", "-O", "json"},
+			expected: legacyHistoryMessage,
+		},
+		{
+			name:     "history alias",
+			command:  "hist",
+			args:     []string{"curl"},
+			expected: legacyHistoryMessage,
+		},
+	}
 
-	var output bytes.Buffer
-	parent.SetOut(&output)
-	parent.SetErr(&output)
-	parent.SetArgs([]string{"update", "-a", "--bump", "curl"})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parent := &cobra.Command{Use: "component"}
+			legacyOnAppInit(nil, parent)
 
-	require.NoError(t, parent.Execute())
-	assert.Equal(t, legacyUpdateMessage+"\n", output.String())
+			var output bytes.Buffer
+			parent.SetOut(&output)
+			parent.SetErr(&output)
+			parent.SetArgs(append([]string{test.command}, test.args...))
 
-	command, _, err := parent.Find([]string{"update"})
-	require.NoError(t, err)
-	assert.True(t, command.Hidden)
-	assert.True(t, command.DisableFlagParsing)
+			require.NoError(t, parent.Execute())
+			assert.Equal(t, test.expected+"\n", output.String())
+
+			command, _, err := parent.Find([]string{test.command})
+			require.NoError(t, err)
+			assert.True(t, command.Hidden)
+			assert.True(t, command.DisableFlagParsing)
+		})
+	}
 }

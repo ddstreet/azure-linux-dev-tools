@@ -27,7 +27,6 @@ components defined in the project configuration.`,
 	buildOnAppInit(app, cmd)
 	changedOnAppInit(app, cmd)
 	diffSourcesOnAppInit(app, cmd)
-	historyOnAppInit(app, cmd)
 	legacyOnAppInit(app, cmd)
 	listOnAppInit(app, cmd)
 	prepareOnAppInit(app, cmd)
