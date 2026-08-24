@@ -92,11 +92,6 @@
        "description": "Git ref to compare to",
        "type": "string"
       },
-      "upstream-commits-dir": {
-       "default": "base/upstream-commits",
-       "description": "directory containing generated upstream-commit TOML files",
-       "type": "string"
-      },
       "verbose": {
        "default": false,
        "description": "enable verbose output",

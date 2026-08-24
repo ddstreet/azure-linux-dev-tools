@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	componentcmds "github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/component"
-	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,6 +36,9 @@ func TestNewChangedCmd_Flags(t *testing.T) {
 
 	allComponentsFlag := cmd.Flags().Lookup("all-components")
 	require.NotNil(t, allComponentsFlag, "--all-components flag should be registered")
+
+	assert.Nil(t, cmd.Flags().Lookup("upstream-commits-dir"),
+		"--upstream-commits-dir should not be registered")
 }
 
 func TestNewChangedCmd_FromRequired(t *testing.T) {
@@ -46,16 +48,4 @@ func TestNewChangedCmd_FromRequired(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "from")
-}
-
-func TestChangedCmd_NoComponents(t *testing.T) {
-	testEnv := testutils.NewTestEnv(t)
-
-	cmd := componentcmds.NewChangedCmd()
-	cmd.SetArgs([]string{"--from", "HEAD", "nonexistent-component"})
-
-	err := cmd.ExecuteContext(testEnv.Env)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "component not found")
 }

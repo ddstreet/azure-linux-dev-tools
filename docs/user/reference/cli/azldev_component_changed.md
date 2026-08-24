@@ -6,17 +6,26 @@ Detect which components changed between two git refs
 
 ### Synopsis
 
-Compare generated upstream-commit TOMLs and rendered sources between two git refs to
-determine which components changed. For each component, reports whether its
-resolved upstream commit changed and whether its rendered sources file changed.
+Load the project configuration independently at two git refs and compare the
+resolved component build inputs. Normal project TOML parsing is used at each
+ref, including recursive includes, config merging, component defaults, and
+generated upstream-commit TOMLs included by the project.
+
+For each selected component, the command reports whether the remaining build
+inputs represented by the former lock-file fingerprint changed: normalized
+component configuration, upstream commit or local spec-directory contents,
+overlay source filenames and contents, and effective distro release version.
+The removed lock-file manual-bump input has no current equivalent.
+
+Documentation, publishing, test-selection, scheduling-hint, snapshot-time, and
+checkout-path-only fields do not trigger a component change. The sourcesChange
+field separately compares the raw committed sources manifests at the rendered
+spec directories configured by each ref. All-component scans use the union of
+components in both refs, so added and deleted components are reported without
+consulting the current checkout.
 
 This is useful for CI/CD pipelines to determine which components need to be
 rebuilt or have their lookaside tarballs re-uploaded after a PR merge.
-
-Note: component selection and directory paths
-are resolved from the current checkout's configuration, not from the compared
-refs. For accurate results, run this command from a checkout that matches the
---to ref (e.g., after merging a PR).
 
 ```
 azldev component changed [flags]
@@ -49,7 +58,6 @@ azldev component changed [flags]
       --include-unchanged             Include unchanged components in output (only applies to broad -a scans; explicit selections always show status)
   -s, --spec-path stringArray         Spec path
       --to string                     Git ref to compare to (default "HEAD")
-      --upstream-commits-dir string   directory containing generated upstream-commit TOML files (default "base/upstream-commits")
 ```
 
 ### Options inherited from parent commands
