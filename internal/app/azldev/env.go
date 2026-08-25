@@ -222,14 +222,13 @@ func (env *Env) SetNetworkRetries(retries int) {
 	env.networkRetries = retries
 }
 
-// PermissiveConfigParsing returns whether permissive parsing of configuration files
-// is enabled, where unknown fields are ignored instead of causing an error.
+// PermissiveConfigParsing returns whether permissive configuration loading is enabled.
+// In permissive mode, unknown fields and semantic validation errors produce warnings.
 func (env *Env) PermissiveConfigParsing() bool {
 	return env.permissiveConfigParsing
 }
 
-// SetPermissiveConfigParsing enables or disables permissive parsing of
-// configuration files, where unknown fields are ignored instead of causing an error.
+// SetPermissiveConfigParsing enables or disables permissive configuration loading.
 func (env *Env) SetPermissiveConfigParsing(permissive bool) {
 	env.permissiveConfigParsing = permissive
 }

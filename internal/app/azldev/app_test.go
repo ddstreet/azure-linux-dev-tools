@@ -193,3 +193,31 @@ func TestApp_PermissiveConfigOption_DefaultFalse(t *testing.T) {
 	assert.Zero(t, result)
 	assert.True(t, ran)
 }
+
+func TestApp_CommandPermissiveConfigAnnotation(t *testing.T) {
+	app := createTestApp(t)
+
+	ran := false
+	cmd := &cobra.Command{
+		Use: "test-cmd",
+		Annotations: map[string]string{
+			azldev.CommandAnnotationPermissiveConfig: "true",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			env, err := azldev.GetEnvFromCommand(cmd)
+			require.NoError(t, err)
+
+			assert.True(t, env.PermissiveConfigParsing())
+
+			ran = true
+
+			return nil
+		},
+	}
+
+	app.AddTopLevelCommand(cmd)
+
+	result := app.Execute([]string{"test-cmd"})
+	assert.Zero(t, result)
+	assert.True(t, ran)
+}

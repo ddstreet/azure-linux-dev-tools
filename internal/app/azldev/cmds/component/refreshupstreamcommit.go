@@ -57,6 +57,9 @@ it.
 All TOML configuration is resolved before the source type is checked. Selected
 components whose effective spec.type is not "upstream" do not contact an
 upstream provider, and any generated upstream-commit TOML for them is removed.
+Configuration is loaded permissively for this command so stale generated pins
+cannot prevent cleanup after a component is removed or changed to another
+source type. Other configuration validation failures are reported as warnings.
 
 When updating all components (-a), orphan generated TOML files are
 automatically pruned.
@@ -88,6 +91,9 @@ any component is stale or any generated TOML would be pruned. Intended for CI ga
 			return RefreshUpstreamCommits(env, options)
 		}),
 		ValidArgsFunction: components.GenerateComponentNameCompletions,
+		Annotations: map[string]string{
+			azldev.CommandAnnotationPermissiveConfig: "true",
+		},
 	}
 
 	components.AddComponentFilterOptionsToCommand(cmd, &options.ComponentFilter)

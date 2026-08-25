@@ -19,6 +19,9 @@ The command uses the fully merged component configuration. It resolves and
 writes a pin only when the selected component's effective `spec.type` is
 `upstream`; for other source types, it removes any existing generated pin
 without contacting an upstream provider.
+It loads configuration permissively so a stale generated pin cannot block
+cleanup after a component is removed or converted to another source type.
+Other configuration validation failures are still reported as warnings.
 
 ## When to run `refresh-upstream-commit`
 

@@ -20,6 +20,9 @@ const (
 	// CommandAnnotationRootOK is a [cobra.Command.Annotations] key used to indicate that a command
 	// is allowed to be run as root.
 	CommandAnnotationRootOK = "rootOK"
+	// CommandAnnotationPermissiveConfig is a [cobra.Command.Annotations] key used to indicate that
+	// project configuration must be loaded permissively before running a command.
+	CommandAnnotationPermissiveConfig = "azldev.config.permissive"
 )
 
 const (

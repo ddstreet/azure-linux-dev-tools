@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	componentcmds "github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/component"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/testutils"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/upstreamcommit"
+	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileperms"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +28,7 @@ func TestNewRefreshUpstreamCommitCmd(t *testing.T) {
 	assert.Equal(t, "refresh-upstream-commit", cmd.Use)
 	assert.NotNil(t, cmd.RunE)
 	assert.Nil(t, cmd.Flags().Lookup("bump"))
+	assert.Contains(t, cmd.Annotations, azldev.CommandAnnotationPermissiveConfig)
 }
 
 func TestNewRefreshUpstreamCommitCmd_Flags(t *testing.T) {
@@ -48,6 +51,78 @@ func TestRefreshUpstreamCommitCmd_NoComponents(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "component not found")
+}
+
+func TestRefreshUpstreamCommitCmd_CleansPinsThatInvalidateStrictConfig(t *testing.T) {
+	testCases := []struct {
+		name            string
+		componentConfig string
+	}{
+		{
+			name: "removed component",
+		},
+		{
+			name: "converted to local",
+			componentConfig: `[components.test-component.spec]
+type = "local"
+path = "../../specs/test-component.spec"
+`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testEnv := testutils.NewTestEnv(t)
+
+			rootConfig := `includes = [
+    "base/upstream-commits/*.toml",
+    "base/components/*.toml",
+]
+
+[project]
+default-distro = { name = "test-distro", version = "1.0" }
+
+[distros.test-distro]
+default-version = "1.0"
+
+[distros.test-distro.versions."1.0"]
+release-ver = "1.0"
+`
+			require.NoError(t, fileutils.WriteFile(
+				testEnv.TestFS,
+				"/project/azldev.toml",
+				[]byte(rootConfig),
+				fileperms.PublicFile,
+			))
+
+			if testCase.componentConfig != "" {
+				require.NoError(t, fileutils.WriteFile(
+					testEnv.TestFS,
+					"/project/base/components/test-component.toml",
+					[]byte(testCase.componentConfig),
+					fileperms.PublicFile,
+				))
+			}
+
+			store := upstreamcommit.NewStore(testEnv.TestFS, testUpstreamCommitsDir)
+			require.NoError(t, store.Save("test-component", "abc1234"))
+
+			app := azldev.NewApp(
+				testEnv.TestInterfaces.FileSystemFactory,
+				testEnv.TestInterfaces.OSEnvFactory,
+			)
+			componentcmds.OnAppInit(app)
+
+			exitCode := app.Execute([]string{
+				"component", "refresh-upstream-commit", "--all-components",
+			})
+			require.Zero(t, exitCode)
+
+			_, exists, err := store.Get("test-component")
+			require.NoError(t, err)
+			assert.False(t, exists)
+		})
+	}
 }
 
 // setupMockGit configures the test environment's CmdFactory to simulate git operations.

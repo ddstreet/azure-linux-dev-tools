@@ -49,6 +49,7 @@ type App struct {
 	reportFormat            ReportFormat
 	disableDefaultConfig    bool
 	permissiveConfigParsing bool
+	commandPermissiveConfig bool
 	configFiles             []string
 	colorMode               ColorMode
 
@@ -135,7 +136,7 @@ lives), or use -C to point to one.`,
 			env.SetAcceptAllPrompts(app.acceptAllPrompts)
 			env.SetColorMode(app.colorMode)
 			env.SetNetworkRetries(app.networkRetries)
-			env.SetPermissiveConfigParsing(app.permissiveConfigParsing)
+			env.SetPermissiveConfigParsing(app.permissiveConfigEnabled())
 
 			return nil
 		},
@@ -258,6 +259,7 @@ func (a *App) Execute(args []string) int {
 	// the "right thing" to happen.
 	//
 	a.handParseConfigFlags(args)
+	a.commandPermissiveConfig = a.commandRequestsPermissiveConfig(args)
 
 	envOptions := a.initializeEnvOptions()
 
@@ -359,6 +361,21 @@ func (a *App) Execute(args []string) int {
 	// where the verbose log is stored.
 	//
 	return a.dispatchToCommand(env, args)
+}
+
+func (a *App) commandRequestsPermissiveConfig(args []string) bool {
+	cmd, _, err := a.cmd.Find(args)
+	if err != nil {
+		return false
+	}
+
+	_, permissive := cmd.Annotations[CommandAnnotationPermissiveConfig]
+
+	return permissive
+}
+
+func (a *App) permissiveConfigEnabled() bool {
+	return a.permissiveConfigParsing || a.commandPermissiveConfig
 }
 
 func (*App) setCmdFactory(envOptions *EnvOptions) error {
@@ -536,7 +553,7 @@ func (a *App) findAndLoadConfig(tempDirPath string, extraConfigFiles []string) (
 		a.disableDefaultConfig,
 		tempDirPath,
 		extraConfigFiles,
-		a.permissiveConfigParsing,
+		a.permissiveConfigEnabled(),
 	)
 	if err != nil {
 		return projectDir, config, fmt.Errorf("failed to load project configuration:\n%w", err)

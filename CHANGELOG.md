@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refresh-upstream-commit` to resolve and record upstream commits. It supports
   check-only operation, removes obsolete pins for selected non-upstream
   components, and prunes orphaned generated files when all components are
-  selected.
+  selected. Configuration is loaded permissively for this command so stale
+  generated pins can be removed after a component is deleted or converted to
+  another source type.
 
 ### Changed
 
