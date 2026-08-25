@@ -7,6 +7,47 @@ All notable changes to `azldev` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Generated upstream commit configuration.** Record snapshot-selected
+  upstream commits as normal layered TOML under `base/upstream-commits`.
+  Generated pin files participate in standard configuration loading, merging,
+  provenance tracking, and validation.
+- **Upstream commit refresh command.** Add `azldev component
+  refresh-upstream-commit` to resolve and record upstream commits. It supports
+  check-only operation, removes obsolete pins for selected non-upstream
+  components, and prunes orphaned generated files when all components are
+  selected.
+
+### Changed
+
+- **Configuration-based component change detection.** Make `azldev component
+  changed` load each historical project configuration independently and
+  compare normalized build inputs instead of stored fingerprints. The command
+  handles added and deleted components, resolves recursive includes and
+  inherited defaults at each ref, compares local source and overlay content,
+  and reports rendered `sources` changes separately.
+- **Synthetic source history.** Build synthetic dist-git history from
+  configured upstream commit transitions and walk first-parent history to the
+  repository root instead of relying on lock-recorded import commits.
+- **Component workflow guidance.** Update generated CLI documentation and
+  agent skills to describe upstream commit configuration and the refresh
+  workflow.
+
+### Removed
+
+- **Component lock files and fingerprints.** Remove lock-file serialization,
+  validation, drift warnings, input fingerprints, resolution-input hashes,
+  import commits, format versions, and manual-bump state. Remove the associated
+  `--bump`, `--force-recalculate`, and lock-validation command-line workflows;
+  the legacy project `lock-dir` field is accepted but ignored.
+- **Legacy component commands.** Remove the `component history` and `component
+  query` implementations and replace `component update` with
+  `component refresh-upstream-commit`. Hidden no-op compatibility shims remain
+  registered but are omitted from generated CLI reference documentation.
+
 ## [0.3.0] - 2026-08-10
 
 ### Added
