@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/docs"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/testctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileperms"
@@ -47,6 +48,41 @@ func TestGenerateMarkdownDocs(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(outputDir, "*.md"))
 	require.NoError(t, err)
 	require.NotEmpty(t, matches, "Expected at least one markdown file to be generated")
+}
+
+func TestGenerateMarkdownDocs_ExcludesAnnotatedHiddenCommands(t *testing.T) {
+	ctx := testctx.NewCtx(testctx.WithHostFS())
+	outputDir := filepath.Join(t.TempDir(), "docs")
+
+	root := newTestCommand()
+	run := func(*cobra.Command, []string) {}
+	visible := &cobra.Command{Use: "visible", Short: "Visible command", Run: run}
+	supportedHidden := &cobra.Command{
+		Use: "supported-hidden", Short: "Supported hidden command", Hidden: true, Run: run,
+	}
+	excluded := &cobra.Command{
+		Use: "legacy", Short: "Legacy compatibility command", Hidden: true, Run: run,
+	}
+	azldev.ExcludeFromMarkdownDocs(excluded)
+	root.AddCommand(visible, supportedHidden, excluded)
+
+	err := docs.GenerateMarkdownDocs(ctx.FS(), root, &docs.GenerateMarkdownOptions{
+		OutputDir:     outputDir,
+		IncludeHidden: true,
+	})
+	require.NoError(t, err)
+
+	assert.FileExists(t, filepath.Join(outputDir, "test_visible.md"))
+	assert.FileExists(t, filepath.Join(outputDir, "test_supported-hidden.md"))
+	assert.NoFileExists(t, filepath.Join(outputDir, "test_legacy.md"))
+
+	rootDoc, err := fileutils.ReadFile(ctx.FS(), filepath.Join(outputDir, "test.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(rootDoc), "test legacy")
+	assert.Contains(t, string(rootDoc), "test supported-hidden")
+
+	assert.True(t, supportedHidden.Hidden, "generation must restore supported hidden state")
+	assert.True(t, excluded.Hidden, "generation must restore excluded hidden state")
 }
 
 func TestCheckOutputDir_NonExistentDir(t *testing.T) {

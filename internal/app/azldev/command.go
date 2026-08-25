@@ -41,6 +41,10 @@ const CmdAnnotationMCPEnabled = "azldev.mcp.enabled"
 // hint to auto-approve the tool. The value associated with the key is ignored.
 const CmdAnnotationMCPReadOnly = "azldev.mcp.readonly"
 
+// CmdAnnotationMarkdownDocsExcluded prevents a command from appearing in generated Markdown
+// reference documentation, including when hidden commands are requested.
+const CmdAnnotationMarkdownDocsExcluded = "azldev.docs.markdown-excluded"
+
 // cmdMCPAnnotationValue is the placeholder value stored for MCP command annotations; only the
 // presence of the key matters.
 const cmdMCPAnnotationValue = "true"
@@ -241,6 +245,16 @@ func ExportAsReadOnlyMCPTool(cmd *cobra.Command) {
 	for _, subCmd := range cmd.Commands() {
 		ExportAsReadOnlyMCPTool(subCmd)
 	}
+}
+
+// ExcludeFromMarkdownDocs prevents cmd from appearing in generated Markdown reference
+// documentation while leaving it registered for compatibility.
+func ExcludeFromMarkdownDocs(cmd *cobra.Command) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = make(map[string]string)
+	}
+
+	cmd.Annotations[CmdAnnotationMarkdownDocsExcluded] = "true"
 }
 
 // Displays the results of a command in the appropriate format to stdout.

@@ -42,11 +42,8 @@ in the project configuration.
 * [azldev component build](azldev_component_build.md)	 - Build packages for components
 * [azldev component changed](azldev_component_changed.md)	 - Detect which components changed between two git refs
 * [azldev component diff-sources](azldev_component_diff-sources.md)	 - Show the diff that overlays apply to a component's sources
-* [azldev component history](azldev_component_history.md)	 - azldev component history no longer does anything and should no longer be used.
 * [azldev component list](azldev_component_list.md)	 - List components in this project
 * [azldev component prepare-sources](azldev_component_prepare-sources.md)	 - Prepare buildable sources for components
-* [azldev component query](azldev_component_query.md)	 - azldev component query no longer does anything and should no longer be used.
 * [azldev component refresh-upstream-commit](azldev_component_refresh-upstream-commit.md)	 - Resolve and record upstream commits for components
 * [azldev component render](azldev_component_render.md)	 - Render post-overlay specs and sidecar files to a checked-in directory
-* [azldev component update](azldev_component_update.md)	 - azldev component update no longer does anything and should no longer be used.
 

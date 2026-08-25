@@ -23,7 +23,7 @@ func legacyOnAppInit(_ *azldev.App, parentCmd *cobra.Command) {
 }
 
 func newLegacyNoOpCmd(name string, aliases []string, message string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:                name,
 		Aliases:            aliases,
 		Short:              message,
@@ -34,4 +34,8 @@ func newLegacyNoOpCmd(name string, aliases []string, message string) *cobra.Comm
 			cmd.Println(message)
 		},
 	}
+
+	azldev.ExcludeFromMarkdownDocs(cmd)
+
+	return cmd
 }

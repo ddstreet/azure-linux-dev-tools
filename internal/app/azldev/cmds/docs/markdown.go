@@ -99,6 +99,32 @@ func setHiddenRecursive(cmd *cobra.Command, hidden bool) {
 	}
 }
 
+func commandHiddenStates(cmd *cobra.Command) map[*cobra.Command]bool {
+	states := make(map[*cobra.Command]bool)
+
+	var collect func(*cobra.Command)
+
+	collect = func(current *cobra.Command) {
+		states[current] = current.Hidden
+		for _, child := range current.Commands() {
+			collect(child)
+		}
+	}
+	collect(cmd)
+
+	return states
+}
+
+func hideMarkdownExcludedCommands(cmd *cobra.Command) {
+	if _, excluded := cmd.Annotations[azldev.CmdAnnotationMarkdownDocsExcluded]; excluded {
+		cmd.Hidden = true
+	}
+
+	for _, child := range cmd.Commands() {
+		hideMarkdownExcludedCommands(child)
+	}
+}
+
 // CheckOutputDir verifies the output directory state before generation.
 // If the directory exists and is non-empty, it either removes it (when Force is set)
 // or returns an actionable error suggesting --force / -f.
@@ -140,12 +166,17 @@ func GenerateMarkdownDocs(fs opctx.FS, rootCmd *cobra.Command, options *Generate
 	// Strip the dynamic version string from the root command's Short description and disable
 	// the auto-generated date footer so that generated docs don't churn on every build.
 	origShort := rootCmd.Short
+	origHiddenStates := commandHiddenStates(rootCmd)
 	rootCmd.Short = stripVersionFromShort(origShort)
 	rootCmd.DisableAutoGenTag = true
 
 	defer func() {
 		rootCmd.Short = origShort
 		rootCmd.DisableAutoGenTag = false
+
+		for cmd, hidden := range origHiddenStates {
+			cmd.Hidden = hidden
+		}
 	}()
 
 	// Check the output directory state and handle force semantics.
@@ -164,6 +195,8 @@ func GenerateMarkdownDocs(fs opctx.FS, rootCmd *cobra.Command, options *Generate
 		// Unhide all commands so they appear in the generated docs.
 		setHiddenRecursive(rootCmd, false)
 	}
+
+	hideMarkdownExcludedCommands(rootCmd)
 
 	// NOTE: This function can't work with our [opctx.FS] filesystem abstraction, but there's not much
 	// we can do about that.
