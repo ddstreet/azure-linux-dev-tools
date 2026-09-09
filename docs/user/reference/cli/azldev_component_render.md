@@ -2,13 +2,12 @@
 
 ## azldev component render
 
-Render post-overlay specs and sidecar files to a checked-in directory
+Render post-overlay dist-git dirs to a checked-in directory
 
 ### Synopsis
 
-Render the final spec and sidecar files for components after applying all
-configured overlays. The output is written to a directory as generated artifacts
-intended for check-in.
+Render a dist-git dir for each component after applying all configured
+overlays. The output is written as generated artifacts intended for check-in.
 
 The output directory is set via rendered-specs-dir in the project config, or
 via --output-dir on the command line. If neither is set, an error is returned.
@@ -17,8 +16,9 @@ subdirectories based on the first character of their name (e.g., specs/c/curl,
 specs/v/vim).
 
 Unlike prepare-sources, render skips downloading source tarballs from the
-lookaside cache — only spec files, patches, scripts, and other git-tracked
-sidecar files are included. Multiple components can be rendered at once.
+lookaside cache. It preserves the git-tracked contents of each dist-git dir,
+applies configured overlays, and removes any temporary .git metadata.
+Multiple components can be rendered at once.
 
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to
