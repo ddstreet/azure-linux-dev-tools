@@ -30,7 +30,7 @@ command name. `--without-lockfile=false` explicitly selects the default mode.
 | Inspecting resolved state | `azldev component history`, `azldev component query` | read the generated TOML; no equivalent commands |
 | Lock consistency checks | On, with `--skip-lock-validation` to opt out | Not applicable; the flag is not registered |
 | `component changed` | Compares stored input fingerprints | Compares project configuration resolved at each ref |
-| Synthetic dist-git history | Derived from lock-file fingerprint changes | Derived from generated upstream-commit TOML changes |
+| `component render` history | Synthetic commits derived from lock-file fingerprint changes | No synthetic commits; generated TOML history is not inspected |
 | Agent skills and MCP tools | Describe the lock-file workflow | Describe the upstream-commit workflow |
 
 `component update`, `component history`, and `component query` remain registered
@@ -80,11 +80,10 @@ resolved components are created or updated before the command exits with an
 error. Failed components remain unchanged, and orphan pruning is skipped for
 that run.
 
-Commit the refreshed TOML together with the rendered output: synthetic dist-git
-history — and therefore `%autorelease` and `%autochangelog` expansion — is derived
-from committed changes to the generated file. Unlike the default mode, there is no
-fingerprint to compare the working tree against, so uncommitted changes do not
-produce a synthetic commit.
+Commit the refreshed TOML together with the rendered output. In lock-file-free
+mode, `component render` does not inspect the generated TOML's git history or
+create synthetic commits. It preserves `%autorelease` and `%autochangelog`
+unchanged.
 
 ## Detect Changed Components
 

@@ -31,3 +31,16 @@ func gitRepoPreparerOptions(
 		sources.WithDirtyDetection(),
 	}
 }
+
+// renderGitRepoPreparerOptions enables synthetic history for render only in
+// lock-file mode. Lock-file-free render must not inspect the git history of
+// generated upstream-commit TOML files.
+func renderGitRepoPreparerOptions(
+	env *azldev.Env, distro sourceproviders.ResolvedDistro,
+) []sources.PreparerOption {
+	if env.WithoutLockfile() {
+		return nil
+	}
+
+	return gitRepoPreparerOptions(env, distro)
+}
