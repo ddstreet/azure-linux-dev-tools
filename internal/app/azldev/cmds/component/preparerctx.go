@@ -39,7 +39,9 @@ func renderGitRepoPreparerOptions(
 	env *azldev.Env, distro sourceproviders.ResolvedDistro,
 ) []sources.PreparerOption {
 	if env.WithoutLockfile() {
-		return nil
+		return []sources.PreparerOption{
+			sources.WithPreserveGitRepo(),
+		}
 	}
 
 	return gitRepoPreparerOptions(env, distro)

@@ -20,11 +20,11 @@ func TestRenderGitRepoPreparerOptions(t *testing.T) {
 		assert.Len(t, options, 2)
 	})
 
-	t.Run("lock file free mode disables synthetic history", func(t *testing.T) {
+	t.Run("lock file free mode preserves only upstream history", func(t *testing.T) {
 		env := testutils.NewTestEnvWithoutLockfile(t)
 
 		options := renderGitRepoPreparerOptions(env.Env, sourceproviders.ResolvedDistro{})
 
-		assert.Empty(t, options)
+		assert.Len(t, options, 1)
 	})
 }
