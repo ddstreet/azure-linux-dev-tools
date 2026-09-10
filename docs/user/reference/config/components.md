@@ -112,9 +112,9 @@ The `[components.<name>.release]` section controls how azldev manages the Releas
 
 | Mode | Behavior |
 |------|----------|
-| `auto` | Auto-detects from the spec's Release tag value. If `%autorelease` is found, rpmautospec handles it. If a static integer is found, optionally followed by `%{?dist}` or `%{dist}`, it is bumped by the synthetic commit count. |
-| `autorelease` | Explicitly declares the spec uses `%autorelease`. Skips all Release manipulation. Use this for specs with conditional `%autorelease`/`%else` fallbacks that confuse auto-detection. |
-| `static` | Explicitly declares the spec uses a static integer release. Bumps it by the synthetic commit count only when the Release tag is an integer, optionally followed by `%{?dist}` or `%{dist}`. Non-integer or other non-standard Release values (for example, `%{pkg_release}`) require `manual` or an overlay. |
+| `auto` | Auto-detects from the spec's Release tag value. Default-mode rendering uses synthetic history. Lock-file-free rendering preserves local components, initializes upstream `%autorelease` components, and runs `rpmdev-bumpspec` for other upstream releases. |
+| `autorelease` | Explicitly declares that the component uses autorelease behavior. In lock-file-free rendering, local components are preserved; a new upstream rendered dist-git dir gets a generated `changelog` file and `%autochangelog`. |
+| `static` | Explicitly declares that the spec uses a static integer release. Default-mode rendering bumps it by the synthetic commit count. This mode is unsupported by lock-file-free rendering. |
 | `manual` | Skips all automatic Release manipulation. Use for components that manage their own release numbering (e.g. kernel). |
 
 Most components use `auto` (the default) and need no release configuration. Examples:
@@ -129,9 +129,24 @@ calculation = "autorelease"
 calculation = "manual"
 ```
 
-In lock-file-free mode, `component render` does not generate synthetic history,
-so it does not apply a history-based static Release bump. The configured
-Release value is preserved except for changes made by overlays.
+In lock-file-free mode, `component render` does not generate synthetic history:
+
+- Local components must use `auto`, `autorelease`, or `manual`. Their `Release`,
+  spec changelog, and `changelog` file are preserved. For local components,
+  `auto` means `autorelease` when `%autorelease` is detected and `manual`
+  otherwise; both behaviors preserve the files.
+- Upstream `manual` components are also preserved.
+- Upstream `autorelease` components, including `auto` components where
+  `%autorelease` is detected, inspect only whether the rendered dist-git dir
+  exists in `HEAD`. If it does not, render runs `rpmautospec generate-changelog`
+  against the prepared checkout, writes the result to `changelog`, and replaces
+  the spec's `%changelog` body with `%autochangelog`. If the directory already
+  exists in `HEAD`, render makes no release or changelog adjustment.
+- Upstream `auto` components without `%autorelease` run `rpmdev-bumpspec` on the
+  prepared spec.
+
+These commands run directly on the host, not in mock. Lock-file-free render
+rejects explicit `static` calculation.
 
 ## Render Configuration
 

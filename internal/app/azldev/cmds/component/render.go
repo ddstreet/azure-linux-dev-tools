@@ -38,20 +38,7 @@ type RenderOptions struct {
 	CheckOnly         bool
 }
 
-func renderOnAppInit(app *azldev.App, parentCmd *cobra.Command) {
-	parentCmd.AddCommand(NewRenderCmd(cmdOptionsForApp(app)...))
-}
-
-// NewRenderCmd constructs a [cobra.Command] for the "component render" CLI subcommand.
-func NewRenderCmd(opts ...CmdOption) *cobra.Command {
-	var options RenderOptions
-
-	var cmd *cobra.Command
-
-	cmd = &cobra.Command{
-		Use:   "render",
-		Short: "Render post-overlay dist-git dirs to a checked-in directory",
-		Long: `Render a dist-git dir for each component after applying all configured
+const renderLongDescription = `Render a dist-git dir for each component after applying all configured
 overlays. The output is written as generated artifacts intended for check-in.
 
 The output directory is set via rendered-specs-dir in the project config, or
@@ -65,6 +52,12 @@ lookaside cache. It preserves the git-tracked contents of each dist-git dir,
 applies configured overlays, and removes any temporary .git metadata.
 Multiple components can be rendered at once.
 
+In --without-lockfile mode, local components preserve their Release and
+changelog. Upstream components use release.calculation: manual preserves both;
+autorelease initializes a new rendered dist-git dir with 'rpmautospec
+generate-changelog' and %autochangelog; auto detects %autorelease or otherwise
+runs rpmdev-bumpspec. Render never runs these tools in mock.
+
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to
 any component in the project config). Per-component dirs that ARE in config
@@ -73,7 +66,22 @@ result table accurately reflects which components actually changed on disk.
 Top-level non-component siblings (e.g. a hand-placed README.md) are
 preserved. When using a custom output directory (--output-dir), --force is
 required alongside --clean-stale as a safety measure. This flag is only
-valid with -a.`,
+valid with -a.`
+
+func renderOnAppInit(app *azldev.App, parentCmd *cobra.Command) {
+	parentCmd.AddCommand(NewRenderCmd(cmdOptionsForApp(app)...))
+}
+
+// NewRenderCmd constructs a [cobra.Command] for the "component render" CLI subcommand.
+func NewRenderCmd(opts ...CmdOption) *cobra.Command {
+	var options RenderOptions
+
+	var cmd *cobra.Command
+
+	cmd = &cobra.Command{
+		Use:   "render",
+		Short: "Render post-overlay dist-git dirs to a checked-in directory",
+		Long:  renderLongDescription,
 		Example: `  # Render all components (output dir from config)
   azldev component render -a
 
@@ -171,6 +179,12 @@ func RenderComponents(env *azldev.Env, options *RenderOptions) ([]*RenderResult,
 		)
 	}
 
+	componentList := comps.Components()
+
+	if err := validateWithoutLockfileRenderComponents(env, componentList); err != nil {
+		return nil, err
+	}
+
 	// Create a shared staging directory. Each component gets a subdirectory
 	// named by component name. Use the project work dir instead of /tmp to
 	// avoid filling up tmpfs on large renders.
@@ -189,7 +203,6 @@ func RenderComponents(env *azldev.Env, options *RenderOptions) ([]*RenderResult,
 		}
 	}()
 
-	componentList := comps.Components()
 	results := make([]*RenderResult, len(componentList))
 
 	// ── Phase 1: Parallel source preparation ──
@@ -448,7 +461,7 @@ func prepareOneComponent(
 		}}
 	}
 
-	prep, err := prepareComponentSources(env, comp, stagingDir)
+	prep, err := prepareComponentSources(env, comp, stagingDir, compOutputDir)
 	if err != nil {
 		slog.Error("Failed to prepare component sources",
 			"component", componentName, "error", err)
@@ -473,6 +486,7 @@ func prepareComponentSources(
 	env *azldev.Env,
 	comp components.Component,
 	stagingDir string,
+	componentOutputDir string,
 ) (*preparedComponent, error) {
 	componentName := comp.GetName()
 
@@ -517,8 +531,18 @@ func prepareComponentSources(
 	}
 
 	// Ensure the expected spec exists in the prepared dist-git dir.
-	if _, specErr := findSpecFile(env.FS(), componentDir, componentName); specErr != nil {
+	specPath, specErr := findSpecFile(env.FS(), componentDir, componentName)
+	if specErr != nil {
 		return nil, fmt.Errorf("finding spec file for %#q:\n%w", componentName, specErr)
+	}
+
+	if env.WithoutLockfile() {
+		if releaseErr := manageWithoutLockfileRenderRelease(
+			env, comp, componentDir, componentOutputDir, specPath,
+		); releaseErr != nil {
+			return nil, fmt.Errorf("managing release and changelog for %#q:\n%w",
+				componentName, releaseErr)
+		}
 	}
 
 	return &preparedComponent{

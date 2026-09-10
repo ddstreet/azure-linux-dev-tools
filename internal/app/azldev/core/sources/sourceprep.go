@@ -83,6 +83,15 @@ func WithGitRepo(
 	}
 }
 
+// WithPreserveGitRepo returns a [PreparerOption] that preserves the upstream
+// '.git' directory without creating synthetic history. This is used when a
+// caller needs the original dist-git history temporarily.
+func WithPreserveGitRepo() PreparerOption {
+	return func(p *sourcePreparerImpl) {
+		p.preserveGitRepo = true
+	}
+}
+
 // WithDirtyDetection returns a [PreparerOption] that enables uncommitted-change
 // detection during synthetic history generation. When set, the current input
 // fingerprint is compared against the committed lock file; if they differ, a
@@ -174,6 +183,10 @@ type sourcePreparerImpl struct {
 	// upstream .git directory and generating synthetic commit history.
 	withGitRepo bool
 
+	// preserveGitRepo, when true, preserves the upstream .git directory without
+	// enabling synthetic history.
+	preserveGitRepo bool
+
 	// skipLookaside, when true, skips all lookaside cache downloads during
 	// source preparation. Git-tracked files are still fetched.
 	skipLookaside bool
@@ -254,6 +267,10 @@ func NewPreparer(
 		}
 	}
 
+	if impl.withGitRepo {
+		impl.preserveGitRepo = true
+	}
+
 	if impl.dirtyDetection && !impl.withGitRepo {
 		return nil, errors.New("WithDirtyDetection requires WithGitRepo; " +
 			"dirty detection compares fingerprints against committed lock files in the git history")
@@ -277,11 +294,10 @@ func (p *sourcePreparerImpl) PrepareSources(
 		}
 	}
 
-	// Preserve the upstream .git directory only when dist-git creation is
-	// requested via --with-git. This is required so that overlay commits can be
-	// appended on top of the upstream commit log during synthetic history generation.
+	// Preserve the upstream '.git' directory when synthetic history or another
+	// caller needs the original dist-git history.
 	var fetchOpts []sourceproviders.FetchComponentOption
-	if applyOverlays && p.withGitRepo {
+	if applyOverlays && p.preserveGitRepo {
 		fetchOpts = append(fetchOpts, sourceproviders.WithPreserveGitDir())
 	}
 

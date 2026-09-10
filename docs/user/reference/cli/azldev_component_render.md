@@ -20,6 +20,12 @@ lookaside cache. It preserves the git-tracked contents of each dist-git dir,
 applies configured overlays, and removes any temporary .git metadata.
 Multiple components can be rendered at once.
 
+In --without-lockfile mode, local components preserve their Release and
+changelog. Upstream components use release.calculation: manual preserves both;
+autorelease initializes a new rendered dist-git dir with 'rpmautospec
+generate-changelog' and %autochangelog; auto detects %autorelease or otherwise
+runs rpmdev-bumpspec. Render never runs these tools in mock.
+
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to
 any component in the project config). Per-component dirs that ARE in config

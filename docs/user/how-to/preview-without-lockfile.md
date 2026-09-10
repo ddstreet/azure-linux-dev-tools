@@ -76,8 +76,22 @@ they need only a re-render.
 
 Commit the refreshed TOML together with the rendered output. In lock-file-free
 mode, `component render` does not inspect the generated TOML's git history or
-create synthetic commits. It preserves `%autorelease` and `%autochangelog`
-unchanged.
+create synthetic commits. Release and changelog handling is instead based on
+the component source type and `release.calculation`:
+
+- Local components preserve their `Release` and changelog. `static` is not
+  supported; `auto` preserves `%autorelease` and otherwise behaves as `manual`.
+- Upstream `manual` components preserve their `Release` and changelog.
+- Upstream `autorelease` components, including `auto` components whose
+  `Release` uses `%autorelease`, are initialized only when their rendered
+  dist-git dir is absent from `HEAD`. Initialization writes the output of
+  `rpmautospec generate-changelog` to `changelog` and sets the spec's `%changelog`
+  body to `%autochangelog`.
+- Upstream `auto` components without `%autorelease` are updated with
+  `rpmdev-bumpspec`.
+
+The `rpmautospec` and `rpmdev-bumpspec` commands run directly on the host, never in
+mock. Explicit `static` calculation is unsupported in lock-file-free render.
 
 ## Detect Changed Components
 
