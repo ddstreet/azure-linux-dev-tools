@@ -279,20 +279,18 @@ func (g ComponentGroupConfig) WithAbsolutePaths(referenceDir string) ComponentGr
 type ReleaseCalculation string
 
 const (
-	// ReleaseCalculationAuto is the default. azldev auto-detects whether the spec uses
-	// %autorelease or a static integer release, and handles each accordingly.
+	// ReleaseCalculationAuto is the default. Rendering auto-detects whether the
+	// spec uses %autorelease and applies the mode-specific behavior.
 	ReleaseCalculationAuto ReleaseCalculation = "auto"
 
-	// ReleaseCalculationAutorelease explicitly declares that the spec uses %autorelease.
-	// azldev skips all Release tag manipulation, letting rpmautospec resolve the release
-	// number from git history. Use this for specs with conditional %autorelease/%else
-	// fallbacks that confuse auto-detection.
+	// ReleaseCalculationAutorelease explicitly selects autorelease handling.
+	// Use this for specs with conditional %autorelease/%else fallbacks that
+	// confuse auto-detection.
 	ReleaseCalculationAutorelease ReleaseCalculation = "autorelease"
 
 	// ReleaseCalculationStatic explicitly declares that the spec uses a static
-	// release tag. azldev parses and bumps the release value during rendering.
-	// Use this for specs with conditional Release tags where auto-detection
-	// picks the wrong branch but the static release logic still works correctly.
+	// release tag. It is supported by lock-file rendering and rejected by
+	// lock-file-free rendering.
 	ReleaseCalculationStatic ReleaseCalculation = "static"
 
 	// ReleaseCalculationManual skips all automatic Release tag manipulation. Use this for

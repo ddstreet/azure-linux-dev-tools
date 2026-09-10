@@ -101,6 +101,51 @@ func TestPrepareSources_Success(t *testing.T) {
 	assert.NotContains(t, string(specContents), "Source9999")
 }
 
+func TestPrepareSources_PreservesGitWithoutSyntheticHistory(t *testing.T) {
+	const outputSpecPath = testOutputDir + "/test-component.spec"
+
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+	sourceManager := sourceproviders_test.NewMockSourceManager(ctrl)
+	ctx := testctx.NewCtx()
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(&projectconfig.ComponentConfig{})
+	sourceManager.EXPECT().FetchComponent(
+		gomock.Any(), component, testOutputDir, gomock.Any(),
+	).DoAndReturn(func(
+		_ interface{},
+		_ interface{},
+		_ string,
+		opts ...sourceproviders.FetchComponentOption,
+	) error {
+		var resolved sourceproviders.FetchComponentOptions
+		for _, opt := range opts {
+			opt(&resolved)
+		}
+
+		assert.True(t, resolved.PreserveGitDir)
+		assert.True(t, resolved.SkipLookaside)
+
+		return fileutils.WriteFile(
+			ctx.FS(), outputSpecPath, []byte("# test spec"), fileperms.PublicFile,
+		)
+	})
+
+	preparer, err := sources.NewPreparer(
+		sourceManager,
+		ctx.FS(),
+		ctx,
+		ctx,
+		sources.WithPreserveGitRepo(),
+		sources.WithSkipLookaside(),
+	)
+	require.NoError(t, err)
+
+	err = preparer.PrepareSources(ctx, component, testOutputDir, true /*applyOverlays*/)
+	require.NoError(t, err)
+}
+
 // TestPrepareSources_ArchiveOverlayRehashesSourcesEntry is an end-to-end check
 // of the key correctness behavior introduced with archive overlays: when an
 // archive-scoped overlay mutates an archive's contents, the matching 'sources'
