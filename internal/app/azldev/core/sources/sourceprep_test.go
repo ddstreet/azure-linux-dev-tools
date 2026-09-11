@@ -4,12 +4,14 @@
 package sources_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components/components_testutils"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/testctx"
@@ -144,6 +146,74 @@ func TestPrepareSources_PreservesGitWithoutSyntheticHistory(t *testing.T) {
 
 	err = preparer.PrepareSources(ctx, component, testOutputDir, true /*applyOverlays*/)
 	require.NoError(t, err)
+}
+
+func TestPrepareSources_BeforeOverlaysSeesPristineSources(t *testing.T) {
+	const outputSpecPath = testOutputDir + "/test-component.spec"
+
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+	sourceManager := sourceproviders_test.NewMockSourceManager(ctrl)
+	ctx := testctx.NewCtx()
+	config := &projectconfig.ComponentConfig{
+		Name: "test-component",
+		Overlays: []projectconfig.ComponentOverlay{
+			{
+				Type:  projectconfig.ComponentOverlayAddSpecTag,
+				Tag:   "BuildRequires",
+				Value: "overlay-dependency",
+			},
+		},
+	}
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(config)
+	sourceManager.EXPECT().FetchComponent(
+		gomock.Any(), component, testOutputDir, gomock.Any(),
+	).DoAndReturn(func(
+		_ interface{},
+		_ interface{},
+		_ string,
+		_ ...sourceproviders.FetchComponentOption,
+	) error {
+		return fileutils.WriteFile(
+			ctx.FS(),
+			outputSpecPath,
+			[]byte("Name: test-component\nRelease: %autorelease\n"),
+			fileperms.PublicFile,
+		)
+	})
+
+	callbackCalled := false
+	preparer, err := sources.NewPreparer(
+		sourceManager,
+		ctx.FS(),
+		ctx,
+		ctx,
+		sources.WithSkipLookaside(),
+		sources.WithBeforeOverlays(func(
+			_ context.Context,
+			_ components.Component,
+			_ string,
+		) error {
+			callbackCalled = true
+			specData, readErr := fileutils.ReadFile(ctx.FS(), outputSpecPath)
+			require.NoError(t, readErr)
+			assert.NotContains(t, string(specData), "overlay-dependency")
+
+			return nil
+		}),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, preparer.PrepareSources(
+		ctx, component, testOutputDir, true, /*applyOverlays*/
+	))
+	assert.True(t, callbackCalled)
+
+	specData, err := fileutils.ReadFile(ctx.FS(), outputSpecPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(specData), "BuildRequires: overlay-dependency")
 }
 
 // TestPrepareSources_ArchiveOverlayRehashesSourcesEntry is an end-to-end check

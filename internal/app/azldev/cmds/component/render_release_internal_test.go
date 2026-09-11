@@ -148,13 +148,18 @@ func TestValidateWithoutLockfileRenderReleaseConfig(t *testing.T) {
 	}
 }
 
-func TestInitializeAutoreleaseRender(t *testing.T) {
+func TestGenerateAndFinalizeAutoreleaseRender(t *testing.T) {
 	testEnv := testutils.NewTestEnvWithoutLockfile(t)
 	testEnv.CmdFactory.RegisterCommandInSearchPath("rpmautospec")
 	testEnv.CmdFactory.RunHandler = func(command *exec.Cmd) error {
 		assert.Equal(t, []string{"rpmautospec", "generate-changelog", "test.spec"}, command.Args)
 		assert.Equal(t, "/staging/test", command.Dir)
-		_, err := command.Stdout.Write(
+
+		pristineSpec, err := fileutils.ReadFile(testEnv.TestFS, "/staging/test/test.spec")
+		require.NoError(t, err)
+		assert.NotContains(t, string(pristineSpec), "BuildRequires: overlay-dependency")
+
+		_, err = command.Stdout.Write(
 			[]byte("* Wed Sep 10 2026 Test User <test@example.com> - 1.0-1\n- Initial\n"),
 		)
 
@@ -171,7 +176,19 @@ func TestInitializeAutoreleaseRender(t *testing.T) {
 		fileperms.PublicFile,
 	))
 
-	err := initializeAutoreleaseRender(testEnv.Env, componentDir, specPath)
+	changelogData, err := generateAutoreleaseChangelog(
+		t.Context(), testEnv.Env, componentDir, specPath,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, fileutils.WriteFile(
+		testEnv.TestFS,
+		specPath,
+		[]byte("Name: test\nRelease: %autorelease\nBuildRequires: overlay-dependency\n\n%changelog\nold entry\n"),
+		fileperms.PublicFile,
+	))
+
+	err = finalizeAutoreleaseRender(testEnv.Env, componentDir, specPath, changelogData)
 	require.NoError(t, err)
 
 	changelog, err := fileutils.ReadFile(testEnv.TestFS, filepath.Join(componentDir, "changelog"))
@@ -183,11 +200,11 @@ func TestInitializeAutoreleaseRender(t *testing.T) {
 	updatedSpec, err := fileutils.ReadFile(testEnv.TestFS, specPath)
 	require.NoError(t, err)
 	assert.Equal(t,
-		"Name: test\nRelease: %autorelease\n\n%changelog\n%autochangelog\n",
+		"Name: test\nRelease: %autorelease\nBuildRequires: overlay-dependency\n\n%changelog\n%autochangelog\n",
 		string(updatedSpec))
 }
 
-func TestInitializeAutoreleaseRenderCommandFailure(t *testing.T) {
+func TestGenerateAutoreleaseChangelogCommandFailure(t *testing.T) {
 	testEnv := testutils.NewTestEnvWithoutLockfile(t)
 	testEnv.CmdFactory.RegisterCommandInSearchPath("rpmautospec")
 	testEnv.CmdFactory.RunHandler = func(command *exec.Cmd) error {
@@ -196,7 +213,9 @@ func TestInitializeAutoreleaseRenderCommandFailure(t *testing.T) {
 		return errors.New("exit status 1")
 	}
 
-	err := initializeAutoreleaseRender(testEnv.Env, "/staging/test", "/staging/test/test.spec")
+	_, err := generateAutoreleaseChangelog(
+		t.Context(), testEnv.Env, "/staging/test", "/staging/test/test.spec",
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bad spec")
 }
@@ -205,14 +224,36 @@ func TestRunRPMDevBumpSpec(t *testing.T) {
 	testEnv := testutils.NewTestEnvWithoutLockfile(t)
 	testEnv.CmdFactory.RegisterCommandInSearchPath("rpmdev-bumpspec")
 	testEnv.CmdFactory.RunHandler = func(command *exec.Cmd) error {
-		assert.Equal(t, []string{"rpmdev-bumpspec", "test.spec"}, command.Args)
+		assert.Equal(t, []string{
+			"rpmdev-bumpspec",
+			"--userstring", "Test User <test@example.com>",
+			"--datestamp", "Thu Jan 01 1970",
+			"test.spec",
+		}, command.Args)
 		assert.Equal(t, "/staging/test", command.Dir)
 
 		return nil
 	}
 
-	err := runRPMDevBumpSpec(testEnv.Env, "/staging/test", "/staging/test/test.spec")
+	err := runRPMDevBumpSpec(
+		testEnv.Env,
+		"/staging/test",
+		"/staging/test/test.spec",
+		"Test User <test@example.com>",
+		"Thu Jan 01 1970",
+	)
 	require.NoError(t, err)
+}
+
+func TestBumpSpecMetadata(t *testing.T) {
+	userString, datestamp, err := bumpSpecMetadata(object.Signature{
+		Name:  " Test User ",
+		Email: " test@example.com ",
+		When:  time.Date(2026, time.September, 11, 23, 30, 0, 0, time.FixedZone("test", 2*60*60)),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Test User <test@example.com>", userString)
+	assert.Equal(t, "Fri Sep 11 2026", datestamp)
 }
 
 func TestRenderedDirExistsInHeadTreeIgnoresWorkingTree(t *testing.T) {
