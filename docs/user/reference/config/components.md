@@ -139,11 +139,13 @@ In lock-file-free mode, `component render` does not generate synthetic history:
 - Upstream `autorelease` components, including `auto` components where
   `%autorelease` is detected, inspect only whether the rendered dist-git dir
   exists in `HEAD`. If it does not, render runs `rpmautospec generate-changelog`
-  against the prepared checkout, writes the result to `changelog`, and replaces
-  the spec's `%changelog` body with `%autochangelog`. If the directory already
-  exists in `HEAD`, render makes no release or changelog adjustment.
+  against the pristine upstream checkout before applying overlays, writes the
+  result to `changelog`, and replaces the rendered spec's `%changelog` body with
+  `%autochangelog`. If the directory already exists in `HEAD`, render makes no
+  release or changelog adjustment.
 - Upstream `auto` components without `%autorelease` run `rpmdev-bumpspec` on the
-  prepared spec.
+  prepared spec. The project `HEAD` author and UTC commit date are passed
+  explicitly for deterministic changelog output.
 
 These commands run directly on the host, not in mock. Lock-file-free render
 rejects explicit `static` calculation.

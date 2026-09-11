@@ -8,9 +8,11 @@ package scenario_tests
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
+	"github.com/microsoft/azure-linux-dev-tools/scenario/internal/cmdtest"
 	"github.com/microsoft/azure-linux-dev-tools/scenario/internal/projecttest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +28,114 @@ func localComponentConfig(name string, overlays ...projectconfig.ComponentOverla
 		},
 		Overlays: overlays,
 	}
+}
+
+func TestRenderWithoutLockfileReleaseToolsUsePristineAndDeterministicInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long test")
+	}
+
+	const script = `
+set -eux
+
+create_dist_git() {
+	name=$1
+	release=$2
+
+	mkdir -p "upstream/$name"
+	git -C "upstream/$name" init --initial-branch=main
+	git -C "upstream/$name" config user.name "Upstream Author"
+	git -C "upstream/$name" config user.email "upstream@example.com"
+
+	cat >"upstream/$name/$name.spec" <<EOF
+Name: $name
+Version: 1.0
+Release: $release
+Summary: Test package
+License: MIT
+
+%description
+Test package.
+
+%files
+
+%changelog
+EOF
+
+	git -C "upstream/$name" add .
+	GIT_AUTHOR_DATE=2025-01-02T03:04:05Z \
+	GIT_COMMITTER_DATE=2025-01-02T03:04:05Z \
+		git -C "upstream/$name" commit -m "Initial package"
+}
+
+create_dist_git autorelease %autorelease
+create_dist_git static-release '1%{?dist}'
+
+autorelease_commit=$(git -C upstream/autorelease rev-parse HEAD)
+static_commit=$(git -C upstream/static-release rev-parse HEAD)
+upstream_base_uri="file://$PWD/upstream/\$pkg"
+
+mkdir project
+cat >project/azldev.toml <<EOF
+includes = ["distro.toml"]
+
+[project]
+default-distro = { name = "test", version = "1" }
+
+[components.autorelease]
+spec = { type = "upstream", upstream-commit = "$autorelease_commit" }
+
+[components.static-release]
+spec = { type = "upstream", upstream-commit = "$static_commit" }
+EOF
+
+cat >project/distro.toml <<EOF
+[distros.test]
+default-version = "1"
+dist-git-base-uri = "$upstream_base_uri"
+
+[distros.test.versions.'1']
+release-ver = "1"
+dist-git-branch = "main"
+
+[distros.test.versions.'1'.default-component-config]
+spec = { type = "upstream", upstream-distro = { name = "test", version = "1" } }
+EOF
+
+git -C project init --initial-branch=main
+git -C project config user.name "Project Author"
+git -C project config user.email "project@example.com"
+git -C project add .
+GIT_AUTHOR_DATE=2026-02-03T04:05:06Z \
+GIT_COMMITTER_DATE=2026-02-03T04:05:06Z \
+	git -C project commit -m "Add components"
+
+mkdir -p "$HOME"
+echo '%packager First Host <first@example.com>' >"$HOME/.rpmmacros"
+azldev -C project --without-lockfile component render \
+	autorelease static-release -o "$PWD/render-one"
+
+! grep -R "Uncommitted changes" render-one
+grep -F '%autochangelog' render-one/a/autorelease/autorelease.spec
+grep -F '* Tue Feb 03 2026 Project Author <project@example.com> - 1.0-2' \
+	render-one/s/static-release/static-release.spec
+
+echo '%packager Second Host <second@example.com>' >"$HOME/.rpmmacros"
+azldev -C project --without-lockfile component render \
+	autorelease static-release -o "$PWD/render-two"
+
+diff -ru render-one render-two
+`
+
+	results, err := cmdtest.NewScenarioTest().
+		WithScript(strings.NewReader(script)).
+		InContainer().
+		Run(t)
+	require.NoError(t, err)
+
+	t.Logf("Standard output:\n%s", results.Stdout)
+	t.Logf("Standard error:\n%s", results.Stderr)
+	results.AssertZeroExitCode(t)
 }
 
 func TestRenderSimpleLocalSpec(t *testing.T) {

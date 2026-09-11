@@ -521,6 +521,15 @@ func prepareComponentSources(
 		sources.WithUpstreamProvenance(sources.FedoraDistTag(distro.Ref.Name, distro.Version.ReleaseVer)),
 	)
 
+	var releaseManager *withoutLockfileRenderReleaseManager
+	if env.WithoutLockfile() {
+		releaseManager = newWithoutLockfileRenderReleaseManager(
+			env, comp, componentOutputDir,
+		)
+		preparerOpts = append(preparerOpts,
+			sources.WithBeforeOverlays(releaseManager.prepareBeforeOverlays))
+	}
+
 	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating source preparer for %#q:\n%w", componentName, err)
@@ -536,10 +545,8 @@ func prepareComponentSources(
 		return nil, fmt.Errorf("finding spec file for %#q:\n%w", componentName, specErr)
 	}
 
-	if env.WithoutLockfile() {
-		if releaseErr := manageWithoutLockfileRenderRelease(
-			env, comp, componentDir, componentOutputDir, specPath,
-		); releaseErr != nil {
+	if releaseManager != nil {
+		if releaseErr := releaseManager.finalize(componentDir, specPath); releaseErr != nil {
 			return nil, fmt.Errorf("managing release and changelog for %#q:\n%w",
 				componentName, releaseErr)
 		}

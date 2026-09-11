@@ -84,11 +84,14 @@ the component source type and `release.calculation`:
 - Upstream `manual` components preserve their `Release` and changelog.
 - Upstream `autorelease` components, including `auto` components whose
   `Release` uses `%autorelease`, are initialized only when their rendered
-  dist-git dir is absent from `HEAD`. Initialization writes the output of
-  `rpmautospec generate-changelog` to `changelog` and sets the spec's `%changelog`
+  dist-git dir is absent from `HEAD`. Initialization generates changelog history
+  from the pristine upstream checkout, before overlays can make it dirty, then
+  writes that history to `changelog` and sets the rendered spec's `%changelog`
   body to `%autochangelog`.
 - Upstream `auto` components without `%autorelease` are updated with
-  `rpmdev-bumpspec`.
+  `rpmdev-bumpspec`. The changelog identity and date come from the project
+  `HEAD` commit, making repeated renders independent of host RPM configuration
+  and wall-clock time.
 
 The `rpmautospec` and `rpmdev-bumpspec` commands run directly on the host, never in
 mock. Explicit `static` calculation is unsupported in lock-file-free render.
