@@ -77,6 +77,7 @@ type Env struct {
 	quiet                   bool
 	promptsAllowed          bool
 	acceptAllPrompts        bool
+	concurrency             int
 	networkRetries          int
 	permissiveConfigParsing bool
 	withoutLockfile         bool
@@ -174,6 +175,7 @@ func NewEnv(ctx context.Context, options EnvOptions) *Env {
 		verbose:                 false,
 		quiet:                   false,
 		promptsAllowed:          isatty.IsTerminal(os.Stdin.Fd()),
+		concurrency:             defaultConcurrency(),
 		permissiveConfigParsing: false,
 		withoutLockfile:         options.WithoutLockfile,
 
@@ -238,6 +240,28 @@ func (env *Env) SetNetworkRetries(retries int) {
 	}
 
 	env.networkRetries = retries
+}
+
+// Concurrency returns the base concurrency limit used to derive worker counts.
+func (env *Env) Concurrency() int {
+	return env.concurrency
+}
+
+// SetConcurrency sets the base concurrency limit used to derive worker counts.
+// A value of zero selects the default logical CPU count. Negative values are
+// clamped to 1.
+func (env *Env) SetConcurrency(concurrency int) {
+	if concurrency == 0 {
+		concurrency = defaultConcurrency()
+	} else if concurrency < 0 {
+		concurrency = 1
+	}
+
+	env.concurrency = concurrency
+}
+
+func defaultConcurrency() int {
+	return max(1, runtime.NumCPU())
 }
 
 // PermissiveConfigParsing returns whether permissive parsing of configuration files
@@ -418,22 +442,22 @@ func newLockStore(
 	return lockfile.NewStore(fsFactory.FS(), config.Project.LockDir)
 }
 
-// CPUBoundConcurrency returns the recommended concurrency limit for CPU-bound tasks.
-// Returns [runtime.NumCPU], minimum 1.
+// CPUBoundConcurrency returns the concurrency limit for CPU-bound tasks.
+// Returns the configured base concurrency, minimum 1.
 func (env *Env) CPUBoundConcurrency() int {
-	return max(1, runtime.NumCPU())
+	return env.concurrency
 }
 
 // IOBoundConcurrency returns the recommended concurrency limit for I/O-bound tasks
-// (network clones, file copies). Returns 2× [runtime.NumCPU], minimum 1.
+// (network clones, file copies). Returns 2× the configured base concurrency.
 func (env *Env) IOBoundConcurrency() int {
-	return max(1, 2*runtime.NumCPU()) //nolint:mnd // 2x CPU
+	return 2 * env.concurrency //nolint:mnd // 2x base concurrency
 }
 
 // FastConcurrency returns the recommended concurrency limit for tasks that can benefit from higher parallelism.
-// Returns 4× [runtime.NumCPU], minimum 1.
+// Returns 4× the configured base concurrency.
 func (env *Env) FastConcurrency() int {
-	return max(1, 4*runtime.NumCPU()) //nolint:mnd // 4x CPU
+	return 4 * env.concurrency //nolint:mnd // 4x base concurrency
 }
 
 // Enables or disables "accept all prompts" mode.

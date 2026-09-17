@@ -46,6 +46,7 @@ type App struct {
 	quiet                   bool
 	acceptAllPrompts        bool
 	dryRun                  bool
+	concurrency             int
 	networkRetries          int
 	reportFormat            ReportFormat
 	disableDefaultConfig    bool
@@ -137,6 +138,7 @@ lives), or use -C to point to one.`,
 			env.SetDefaultReportFormat(app.reportFormat)
 			env.SetAcceptAllPrompts(app.acceptAllPrompts)
 			env.SetColorMode(app.colorMode)
+			env.SetConcurrency(app.concurrency)
 			env.SetNetworkRetries(app.networkRetries)
 			env.SetPermissiveConfigParsing(app.permissiveConfigEnabled())
 
@@ -179,6 +181,8 @@ func (app *App) registerGlobalFlags() {
 	app.cmd.PersistentFlags().StringArrayVar(&app.configFiles, "config-file", nil,
 		"additional TOML config file(s) to merge (may be repeated)")
 	app.cmd.PersistentFlags().BoolVarP(&app.dryRun, "dry-run", "n", false, "dry run only (do not take action)")
+	app.cmd.PersistentFlags().IntVar(&app.concurrency, "concurrency", 0,
+		"base concurrency limit (default: number of logical CPUs; minimum 1)")
 	app.cmd.PersistentFlags().IntVar(&app.networkRetries, "network-retries", retry.DefaultMaxAttempts,
 		"maximum number of attempts for network operations (minimum 1)")
 	app.cmd.PersistentFlags().VarP(&app.reportFormat, "output-format", "O",

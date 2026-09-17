@@ -26,6 +26,7 @@ Meta commands:
 [1;4;92;4mF[0m[1;4;92;4ml[0m[1;4;92;4ma[0m[1;4;92;4mg[0m[1;4;92;4ms[0m[1;4;92;4m:[0m
   [1;36m-y,[0m [1;36m--accept-all[0m                accept all prompts
       [1;36m--color[0m [3;38;2;68;68;68mmode[0m                output colorization mode {always, auto, never} (default auto)
+      [1;36m--concurrency[0m [3;38;2;68;68;68mint[0m           base concurrency limit (default: number of logical CPUs; minimum 1)
       [1;36m--config-file[0m [3;38;2;68;68;68mstringArray[0m   additional TOML config file(s) to merge (may be repeated)
   [1;36m-n,[0m [1;36m--dry-run[0m                   dry run only (do not take action)
   [1;36m-h,[0m [1;36m--help[0m                      help for azldev

@@ -4,6 +4,7 @@
 package azldev_test
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
@@ -192,6 +193,49 @@ func TestApp_PermissiveConfigOption_DefaultFalse(t *testing.T) {
 	result := app.Execute([]string{"test-cmd"})
 	assert.Zero(t, result)
 	assert.True(t, ran)
+}
+
+func TestApp_ConcurrencyOption(t *testing.T) {
+	testCases := []struct {
+		name     string
+		args     []string
+		expected int
+	}{
+		{name: "defaults to logical CPU count", args: []string{"test-cmd"}, expected: runtime.NumCPU()},
+		{name: "uses explicit value", args: []string{"--concurrency", "3", "test-cmd"}, expected: 3},
+		{name: "supports assignment syntax", args: []string{"test-cmd", "--concurrency=7"}, expected: 7},
+		{name: "zero selects logical CPU count", args: []string{"--concurrency=0", "test-cmd"}, expected: runtime.NumCPU()},
+		{name: "negative value is clamped", args: []string{"--concurrency=-1", "test-cmd"}, expected: 1},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			app := createTestApp(t)
+
+			ran := false
+			cmd := &cobra.Command{
+				Use: "test-cmd",
+				RunE: func(cmd *cobra.Command, _ []string) error {
+					env, err := azldev.GetEnvFromCommand(cmd)
+					require.NoError(t, err)
+
+					assert.Equal(t, testCase.expected, env.Concurrency())
+					assert.Equal(t, testCase.expected, env.CPUBoundConcurrency())
+					assert.Equal(t, 2*testCase.expected, env.IOBoundConcurrency())
+					assert.Equal(t, 4*testCase.expected, env.FastConcurrency())
+
+					ran = true
+
+					return nil
+				},
+			}
+
+			app.AddTopLevelCommand(cmd)
+
+			assert.Zero(t, app.Execute(testCase.args))
+			assert.True(t, ran)
+		})
+	}
 }
 
 func TestApp_WithoutLockfileOption(t *testing.T) {

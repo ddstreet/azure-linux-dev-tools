@@ -35,6 +35,11 @@
        "description": "Component group name",
        "type": "string"
       },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
+      },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
        "type": "string"
@@ -142,6 +147,11 @@
        "description": "Component group name",
        "type": "string"
       },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
+      },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
        "type": "string"
@@ -241,6 +251,11 @@
       "component-group": {
        "description": "Component group name",
        "type": "string"
+      },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
       },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
@@ -342,6 +357,11 @@
        "description": "Component group name",
        "type": "string"
       },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
+      },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
        "type": "string"
@@ -418,6 +438,11 @@
       "color": {
        "description": "output colorization mode {always, auto, never}",
        "type": "string"
+      },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
       },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
@@ -496,6 +521,11 @@
        "description": "output colorization mode {always, auto, never}",
        "type": "string"
       },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
+      },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
        "type": "string"
@@ -568,6 +598,11 @@
       "color": {
        "description": "output colorization mode {always, auto, never}",
        "type": "string"
+      },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
       },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
@@ -646,6 +681,11 @@
       "color": {
        "description": "output colorization mode {always, auto, never}",
        "type": "string"
+      },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
       },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
@@ -737,6 +777,11 @@
        "description": "output colorization mode {always, auto, never}",
        "type": "string"
       },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
+      },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",
        "type": "string"
@@ -814,6 +859,11 @@
       "color": {
        "description": "output colorization mode {always, auto, never}",
        "type": "string"
+      },
+      "concurrency": {
+       "default": 0,
+       "description": "base concurrency limit (default: number of logical CPUs; minimum 1)",
+       "type": "number"
       },
       "config-file": {
        "description": "additional TOML config file(s) to merge (may be repeated)",

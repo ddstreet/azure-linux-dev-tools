@@ -26,6 +26,7 @@ Meta commands:
 Flags:
   -y, --accept-all                accept all prompts
       --color mode                output colorization mode {always, auto, never} (default auto)
+      --concurrency int           base concurrency limit (default: number of logical CPUs; minimum 1)
       --config-file stringArray   additional TOML config file(s) to merge (may be repeated)
   -n, --dry-run                   dry run only (do not take action)
   -h, --help                      help for azldev
