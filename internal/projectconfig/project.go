@@ -11,7 +11,6 @@ import (
 
 	"dario.cat/mergo"
 	"github.com/brunoga/deep"
-	"github.com/go-playground/validator/v10"
 )
 
 // Encapsulates loaded project configuration.
@@ -82,7 +81,7 @@ func (cfg *ProjectConfig) Validate() error {
 // component definitions are validated here rather than per config file, because
 // override merging lets a single file hold a partial definition.
 func (cfg *ProjectConfig) validate(withoutLockfile bool) error {
-	err := validator.New().Struct(cfg)
+	err := projectConfigValidator.Struct(cfg)
 	if err != nil {
 		return fmt.Errorf("config error:\n%w", err)
 	}

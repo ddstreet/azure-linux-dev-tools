@@ -68,15 +68,14 @@ func TestSpecSourceValidation_UpstreamCommit(t *testing.T) {
 		SourceType: projectconfig.SpecSourceTypeUpstream,
 	}))
 
-	// UpstreamCommit is rejected when type is local.
-	require.Error(t, validator.New().Struct(&projectconfig.SpecSource{
+	// UpstreamCommit can be specified independently of the source type so that
+	// the type can be supplied by inherited component defaults.
+	require.NoError(t, validator.New().Struct(&projectconfig.SpecSource{
 		SourceType:     projectconfig.SpecSourceTypeLocal,
 		Path:           "/some/path",
 		UpstreamCommit: "abc1234",
 	}))
-
-	// UpstreamCommit is rejected when type is unspecified.
-	require.Error(t, validator.New().Struct(&projectconfig.SpecSource{
+	require.NoError(t, validator.New().Struct(&projectconfig.SpecSource{
 		UpstreamCommit: "abc1234",
 	}))
 

@@ -463,10 +463,17 @@ var AllowedSourceFilesHashTypes = map[fileutils.HashType]bool{
 // Mutates the component config, updating it with overrides present in other.
 func (c *ComponentConfig) MergeUpdatesFrom(other *ComponentConfig) error {
 	otherOverlayFiles := slices.Clone(other.OverlayFiles)
+	otherSourceConfigFile := other.SourceConfigFile
+	otherWithoutSourceConfigFile := *other
+	otherWithoutSourceConfigFile.SourceConfigFile = nil
 
-	err := mergo.Merge(c, other, mergo.WithOverride, mergo.WithAppendSlice)
+	err := mergo.Merge(c, &otherWithoutSourceConfigFile, mergo.WithOverride, mergo.WithAppendSlice)
 	if err != nil {
 		return fmt.Errorf("failed to merge project info:\n%w", err)
+	}
+
+	if otherSourceConfigFile != nil {
+		c.SourceConfigFile = otherSourceConfigFile
 	}
 
 	if other.OverlayFiles != nil {
@@ -508,6 +515,7 @@ func (c *ComponentConfig) MergeOverridesFrom(other *ComponentConfig) error {
 	otherTopLevel.Build = ComponentBuildConfig{}
 	otherTopLevel.Render = ComponentRenderConfig{}
 	otherTopLevel.Publish = ComponentPublishConfig{}
+	otherTopLevel.SourceConfigFile = nil
 
 	err := mergo.Merge(c, &otherTopLevel, mergo.WithOverride, mergo.WithAppendSlice)
 	if err != nil {

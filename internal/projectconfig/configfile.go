@@ -21,6 +21,11 @@ import (
 //nolint:lll // Can't really break up the long URI.
 const DefaultSchemaURI = "https://raw.githubusercontent.com/microsoft/azure-linux-dev-tools/refs/heads/main/schemas/azldev.schema.json"
 
+// Reuse the validator's reflected type cache across all project config files.
+//
+//nolint:gochecknoglobals // Validator instances are safe for concurrent use once configured.
+var projectConfigValidator = validator.New()
+
 // Encapsulates a serialized project config file; used for serialization/deserialization.
 type ConfigFile struct {
 	// URI for the schema for this file format.
@@ -88,7 +93,7 @@ func (f ConfigFile) Dir() string {
 
 // Validates the format and internal consistency of the config file. Semantic errors are reported.
 func (f ConfigFile) Validate() error {
-	err := validator.New().Struct(f)
+	err := projectConfigValidator.Struct(f)
 	if err != nil {
 		return fmt.Errorf("config file error:\n%w", err)
 	}
@@ -688,10 +693,8 @@ func (f ConfigFile) Serialize(fs opctx.FS, filePath string) error {
 // this is only needed when component validation is deferred until the whole
 // project has been merged (lock-file-free mode).
 func validateComponentStructs(components map[string]ComponentConfig) error {
-	validate := validator.New()
-
 	for componentName, component := range components {
-		if err := validate.Struct(&component); err != nil {
+		if err := projectConfigValidator.Struct(&component); err != nil {
 			return fmt.Errorf("invalid component %#q:\n%w", componentName, err)
 		}
 	}

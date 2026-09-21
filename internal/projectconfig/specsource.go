@@ -21,7 +21,7 @@ type SpecSource struct {
 
 	// UpstreamCommit pins the upstream spec to a specific git commit hash; only relevant for upstream specs.
 	// When set, this takes priority over the snapshot date-time on the distro reference.
-	UpstreamCommit string `toml:"upstream-commit,omitempty" json:"upstreamCommit,omitempty" validate:"excluded_unless=SourceType upstream,omitempty,hexadecimal,min=7,max=40" jsonschema:"title=Upstream commit,description=Git commit hash to pin the upstream spec to. Takes priority over snapshot.,minLength=7,maxLength=40,pattern=^[0-9a-fA-F]+$,example=abc1234def5678"`
+	UpstreamCommit string `toml:"upstream-commit,omitempty" json:"upstreamCommit,omitempty" validate:"omitempty,hexadecimal,min=7,max=40" jsonschema:"title=Upstream commit,description=Git commit hash to pin the upstream spec to. Takes priority over snapshot.,minLength=7,maxLength=40,pattern=^[0-9a-fA-F]+$,example=abc1234def5678"`
 }
 
 // Implements the [Stringer] interface.

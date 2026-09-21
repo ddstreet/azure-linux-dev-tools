@@ -1551,7 +1551,7 @@ calculation = "static"
 	assert.Equal(t, "/project/include.toml", component.UpstreamCommitConfigFile().sourcePath)
 }
 
-func TestLoadAndResolveProjectConfig_WithoutLockfile_ValidatesComponentsAfterMerge(t *testing.T) {
+func TestLoadAndResolveProjectConfig_CommitOnlyInclude(t *testing.T) {
 	testFiles := []struct {
 		path     string
 		contents string
@@ -1577,18 +1577,23 @@ upstream-distro = { name = "fedora", version = "rawhide" }
 		))
 	}
 
-	config, err := loadAndResolveProjectConfig(
-		ctx.FS(), loadOptions{withoutLockfile: true}, testConfigPath,
-	)
-	require.NoError(t, err)
-	require.Contains(t, config.Components, "abc")
-	assert.Equal(t, SpecSourceTypeUpstream, config.Components["abc"].Spec.SourceType)
-	assert.Equal(t, "abcdef1234567", config.Components["abc"].Spec.UpstreamCommit)
+	testCases := []struct {
+		name    string
+		options loadOptions
+	}{
+		{name: "default mode"},
+		{name: "lock-file-free mode", options: loadOptions{withoutLockfile: true}},
+	}
 
-	// The default lock-file mode validates each config file on its own, so the
-	// partial definition in pin.toml is rejected there.
-	_, err = loadAndResolveProjectConfig(ctx.FS(), loadOptions{}, testConfigPath)
-	require.Error(t, err)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			config, err := loadAndResolveProjectConfig(ctx.FS(), testCase.options, testConfigPath)
+			require.NoError(t, err)
+			require.Contains(t, config.Components, "abc")
+			assert.Equal(t, SpecSourceTypeUpstream, config.Components["abc"].Spec.SourceType)
+			assert.Equal(t, "abcdef1234567", config.Components["abc"].Spec.UpstreamCommit)
+		})
+	}
 }
 
 func TestLoadAndResolveProjectConfig_WithoutLockfile_ValidatesCustomScriptBeforeResolvingPath(t *testing.T) {
@@ -1637,7 +1642,7 @@ origin = { type = "custom", script = "../generate.sh" }
 	})
 }
 
-func TestLoadAndResolveProjectConfig_WithoutLockfile_RejectsInvalidComponentAfterMerge(t *testing.T) {
+func TestLoadAndResolveProjectConfig_AcceptsCommitWithoutSourceType(t *testing.T) {
 	const configContents = `
 [components.abc.spec]
 upstream-commit = "abcdef1234567"
@@ -1648,9 +1653,21 @@ upstream-commit = "abcdef1234567"
 		ctx.FS(), testConfigPath, []byte(configContents), fileperms.PrivateFile,
 	))
 
-	_, err := loadAndResolveProjectConfig(ctx.FS(), loadOptions{withoutLockfile: true}, testConfigPath)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "UpstreamCommit")
+	testCases := []struct {
+		name    string
+		options loadOptions
+	}{
+		{name: "default mode"},
+		{name: "lock-file-free mode", options: loadOptions{withoutLockfile: true}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			config, err := loadAndResolveProjectConfig(ctx.FS(), testCase.options, testConfigPath)
+			require.NoError(t, err)
+			assert.Equal(t, "abcdef1234567", config.Components["abc"].Spec.UpstreamCommit)
+		})
+	}
 }
 
 func TestLoadAndResolveProjectConfig_WithoutLockfile_ComponentOverridesEarlierGeneratedCommit(t *testing.T) {

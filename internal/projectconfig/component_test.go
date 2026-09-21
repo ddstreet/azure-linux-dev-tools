@@ -309,6 +309,40 @@ func TestMergeComponentUpdates_OverlayFilesInheritWhenUnset(t *testing.T) {
 	require.Equal(t, []string{"overlays/*.overlay.toml"}, base.OverlayFiles)
 }
 
+func TestMergeComponent_SourceConfigFileOverridesWithoutMerging(t *testing.T) {
+	testCases := []struct {
+		name  string
+		merge func(*projectconfig.ComponentConfig, *projectconfig.ComponentConfig) error
+	}{
+		{name: "updates", merge: (*projectconfig.ComponentConfig).MergeUpdatesFrom},
+		{name: "overrides", merge: (*projectconfig.ComponentConfig).MergeOverridesFrom},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			baseSource := &projectconfig.ConfigFile{
+				Components: map[string]projectconfig.ComponentConfig{
+					"base": {},
+				},
+			}
+			updateSource := &projectconfig.ConfigFile{
+				Components: map[string]projectconfig.ComponentConfig{
+					"update": {},
+				},
+			}
+			base := projectconfig.ComponentConfig{SourceConfigFile: baseSource}
+			update := projectconfig.ComponentConfig{SourceConfigFile: updateSource}
+
+			err := testCase.merge(&base, &update)
+			require.NoError(t, err)
+
+			assert.Same(t, updateSource, base.SourceConfigFile)
+			assert.Equal(t, map[string]projectconfig.ComponentConfig{"base": {}}, baseSource.Components)
+			assert.Equal(t, map[string]projectconfig.ComponentConfig{"update": {}}, updateSource.Components)
+		})
+	}
+}
+
 func TestValidateArchiveOverlayOrigins(t *testing.T) {
 	const archiveName = "pkg.tar.gz"
 
