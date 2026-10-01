@@ -20,6 +20,13 @@ Unlike prepare-sources, render skips downloading source tarballs from the
 lookaside cache — only spec files, patches, scripts, and other git-tracked
 sidecar files are included. Multiple components can be rendered at once.
 
+In --without-lockfile mode, rendering uses host-installed rpmautospec,
+rpmdev-bumpspec, and spectool instead of synthetic git history. Each changed
+component directory is committed automatically together with its generated
+upstream-commit TOML. Components whose committed inputs have not changed since
+their rendered directory was last updated are skipped. Pass --allow-no-change
+to force a rebuild and write a .no_change_rebuild timestamp marker.
+
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to
 any component in the project config). Per-component dirs that ARE in config

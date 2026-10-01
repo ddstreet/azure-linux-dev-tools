@@ -36,6 +36,7 @@ type RenderOptions struct {
 	Force             bool
 	CleanStale        bool
 	CheckOnly         bool
+	AllowNoChange     bool
 }
 
 func renderOnAppInit(app *azldev.App, parentCmd *cobra.Command) {
@@ -64,6 +65,13 @@ specs/v/vim).
 Unlike prepare-sources, render skips downloading source tarballs from the
 lookaside cache — only spec files, patches, scripts, and other git-tracked
 sidecar files are included. Multiple components can be rendered at once.
+
+In --without-lockfile mode, rendering uses host-installed rpmautospec,
+rpmdev-bumpspec, and spectool instead of synthetic git history. Each changed
+component directory is committed automatically together with its generated
+upstream-commit TOML. Components whose committed inputs have not changed since
+their rendered directory was last updated are skipped. Pass --allow-no-change
+to force a rebuild and write a .no_change_rebuild timestamp marker.
 
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to
@@ -97,8 +105,14 @@ valid with -a.`,
 		},
 	}
 
-	addComponentFilterOptions(cmd, &options.ComponentFilter, newCmdOptions(opts...))
+	resolvedOptions := newCmdOptions(opts...)
+	addComponentFilterOptions(cmd, &options.ComponentFilter, resolvedOptions)
+	addRenderOptions(cmd, &options, resolvedOptions)
 
+	return cmd
+}
+
+func addRenderOptions(cmd *cobra.Command, options *RenderOptions, cmdOptions cmdOptions) {
 	cmd.Flags().StringVarP(&options.OutputDir, "output-dir", "o", "",
 		"output directory for rendered specs (overrides rendered-specs-dir from config)")
 	_ = cmd.MarkFlagDirname("output-dir")
@@ -120,13 +134,17 @@ valid with -a.`,
 			"and 1 when any component would drift. With -a + --clean-stale, also fails "+
 			"on orphan rendered-spec directories. Intended for CI gates.")
 
+	if cmdOptions.withoutLockfile {
+		cmd.Flags().BoolVar(&options.AllowNoChange, "allow-no-change", false,
+			"render an unchanged component and write a '.no_change_rebuild' timestamp marker")
+		cmd.MarkFlagsMutuallyExclusive("allow-no-change", "check-only")
+	}
+
 	// --check-only is a read-only diff against on-disk state; --fail-on-error
 	// is the loud-failure-per-run knob. Combining them is semantically
 	// muddled (CI would fail on stale failures even when on-disk markers
 	// already record them) and forcing a choice keeps the contract crisp.
 	cmd.MarkFlagsMutuallyExclusive("fail-on-error", "check-only")
-
-	return cmd
 }
 
 // RenderResult holds the result of rendering a single component.
@@ -147,8 +165,8 @@ const (
 
 // RenderComponents renders the post-overlay spec and sidecar files for each
 // selected component into the output directory. Processing is done in three phases:
-//  1. Parallel source preparation (clone, overlay, synthetic git)
-//  2. Batch mock processing (rpmautospec + spectool in a single chroot call)
+//  1. Parallel source preparation
+//  2. Spec-file discovery (mock for lockfile mode, host tools without lockfiles)
 //  3. Parallel finishing (filter files, remove .git, copy output)
 func RenderComponents(env *azldev.Env, options *RenderOptions) ([]*RenderResult, error) {
 	if err := resolveAndValidateOutputDir(env, options); err != nil {
@@ -172,14 +190,13 @@ func RenderComponents(env *azldev.Env, options *RenderOptions) ([]*RenderResult,
 		)
 	}
 
-	// Create mock processor for rpmautospec/spectool.
-	mockProcessor := createMockProcessor(env)
-	if mockProcessor == nil {
+	mockProcessor := renderMockProcessor(env)
+	if !env.WithoutLockfile() && mockProcessor == nil {
 		return nil, errors.New(
 			"mock config required for rendering; ensure the project has a valid distro with mock config")
 	}
 
-	defer destroyMockProcessor(env, mockProcessor)
+	defer destroyRenderMockProcessor(env, mockProcessor)
 
 	// Create a shared staging directory. Each component gets a subdirectory
 	// named by component name, enabling a single bind mount for the batch
@@ -204,10 +221,12 @@ func RenderComponents(env *azldev.Env, options *RenderOptions) ([]*RenderResult,
 	results := make([]*RenderResult, len(componentList))
 
 	// ── Phase 1: Parallel source preparation ──
-	prepared := parallelPrepare(env, mockProcessor, componentList, stagingDir, options.OutputDir, results)
+	prepared := prepareRenderComponents(
+		env, mockProcessor, componentList, stagingDir, options, results,
+	)
 
-	// ── Phase 2: Batch mock processing ──
-	mockResultMap := batchMockProcess(env, mockProcessor, stagingDir, prepared)
+	// ── Phase 2: Spec-file discovery ──
+	mockResultMap := discoverRenderedSpecFiles(env, mockProcessor, stagingDir, prepared)
 
 	// Prune orphan component dirs (components removed from config) when
 	// --clean-stale is set. Per-component output dirs that match the resolved
@@ -243,14 +262,86 @@ func RenderComponents(env *azldev.Env, options *RenderOptions) ([]*RenderResult,
 	// matches the expected single-marker shape and flags drift on mismatch.
 	writeFailureMarkers(env.FS(), results, options.Force, options.CheckOnly)
 
+	if err := commitRenderResultsIfNeeded(env, options, prepared, results); err != nil {
+		return results, err
+	}
+
 	// Sort results alphabetically for consistent output.
 	sortRenderResults(results)
 
+	return finalizeRenderResults(env.FS(), options, componentList, results)
+}
+
+func prepareRenderComponents(
+	env *azldev.Env,
+	mockProcessor *sources.MockProcessor,
+	componentList []components.Component,
+	stagingDir string,
+	options *RenderOptions,
+	results []*RenderResult,
+) []*preparedComponent {
+	return parallelPrepare(
+		env,
+		mockProcessor,
+		componentList,
+		stagingDir,
+		options.OutputDir,
+		options.AllowNoChange,
+		results,
+	)
+}
+
+func finalizeRenderResults(
+	fs opctx.FS,
+	options *RenderOptions,
+	componentList []components.Component,
+	results []*RenderResult,
+) ([]*RenderResult, error) {
 	if options.CheckOnly {
-		return results, checkOnlyRenderResult(env.FS(), options, componentList, results)
+		return results, checkOnlyRenderResult(fs, options, componentList, results)
 	}
 
 	return results, checkRenderErrors(results, options.FailOnError)
+}
+
+func renderMockProcessor(env *azldev.Env) *sources.MockProcessor {
+	if env.WithoutLockfile() {
+		return nil
+	}
+
+	return createMockProcessor(env)
+}
+
+func destroyRenderMockProcessor(env *azldev.Env, processor *sources.MockProcessor) {
+	if processor != nil {
+		destroyMockProcessor(env, processor)
+	}
+}
+
+func discoverRenderedSpecFiles(
+	env *azldev.Env,
+	mockProcessor *sources.MockProcessor,
+	stagingDir string,
+	prepared []*preparedComponent,
+) map[string]*sources.ComponentMockResult {
+	if env.WithoutLockfile() {
+		return processPreparedSpecsOnHost(env, stagingDir, prepared)
+	}
+
+	return batchMockProcess(env, mockProcessor, stagingDir, prepared)
+}
+
+func commitRenderResultsIfNeeded(
+	env *azldev.Env,
+	options *RenderOptions,
+	prepared []*preparedComponent,
+	results []*RenderResult,
+) error {
+	if !env.WithoutLockfile() || options.CheckOnly {
+		return nil
+	}
+
+	return commitLockfileFreeRenderResults(env, prepared, results)
 }
 
 // checkOnlyRenderResult inspects results from a --check-only run and returns
@@ -360,10 +451,12 @@ func checkRenderErrors(results []*RenderResult, failOnError bool) error {
 // preparedComponent holds the intermediate state after source preparation,
 // before mock processing.
 type preparedComponent struct {
-	index         int
-	comp          components.Component
-	specFilename  string // e.g., "curl.spec"
-	compOutputDir string // validated output path computed in phase 1
+	index             int
+	comp              components.Component
+	specFilename      string // e.g., "curl.spec"
+	compOutputDir     string // validated output path computed in phase 1
+	lockfileFreeState *lockfileFreeRenderState
+	noChangeRebuild   bool
 }
 
 // prepResult pairs a prepared component (on success) or a render result (on error).
@@ -387,6 +480,7 @@ func parallelPrepare(
 	comps []components.Component,
 	stagingDir string,
 	outputDir string,
+	allowNoChange bool,
 	results []*RenderResult,
 ) []*preparedComponent {
 	progressEvent := env.StartEvent("Preparing component sources", "count", len(comps))
@@ -406,7 +500,9 @@ func parallelPrepare(
 			// workerEnv (captured) is the effective context for this call chain;
 			// the parmap-supplied ctx is identical and unused here.
 			//nolint:contextcheck // env carries the ctx
-			return prepareOneComponent(workerEnv, mockProcessor, comp, stagingDir, outputDir)
+			return prepareOneComponent(
+				workerEnv, mockProcessor, comp, stagingDir, outputDir, allowNoChange,
+			)
 		},
 	)
 
@@ -453,6 +549,7 @@ func prepareOneComponent(
 	comp components.Component,
 	stagingDir string,
 	outputDir string,
+	allowNoChange bool,
 ) prepResult {
 	componentName := comp.GetName()
 
@@ -467,7 +564,33 @@ func prepareOneComponent(
 		}}
 	}
 
-	prep, err := prepareComponentSources(env, mockProcessor, comp, stagingDir)
+	unchanged, unchangedErr := lockfileFreeComponentUnchanged(
+		env, comp, compOutputDir,
+	)
+	if unchangedErr != nil {
+		slog.Error("Failed to compare component with its last rendered configuration",
+			"component", componentName, "error", unchangedErr)
+
+		return prepResult{result: &RenderResult{
+			Component: componentName,
+			OutputDir: compOutputDir,
+			Status:    renderStatusError,
+			Error:     unchangedErr.Error(),
+		}}
+	}
+
+	if unchanged && !allowNoChange {
+		slog.Warn("Component has not changed and no rendering is needed",
+			"component", componentName)
+
+		return prepResult{result: &RenderResult{
+			Component: componentName,
+			OutputDir: compOutputDir,
+			Status:    renderStatusOK,
+		}}
+	}
+
+	prep, err := prepareComponentSources(env, mockProcessor, comp, stagingDir, compOutputDir)
 	if err != nil {
 		slog.Error("Failed to prepare component sources",
 			"component", componentName, "error", err)
@@ -478,6 +601,23 @@ func prepareOneComponent(
 			Status:    renderStatusError,
 			Error:     err.Error(),
 		}}
+	}
+
+	if unchanged {
+		componentDir := filepath.Join(stagingDir, componentName)
+		if err := writeNoChangeRebuildMarker(env, componentDir); err != nil {
+			slog.Error("Failed to write no-change rebuild marker",
+				"component", componentName, "error", err)
+
+			return prepResult{result: &RenderResult{
+				Component: componentName,
+				OutputDir: compOutputDir,
+				Status:    renderStatusError,
+				Error:     err.Error(),
+			}}
+		}
+
+		prep.noChangeRebuild = true
 	}
 
 	prep.compOutputDir = compOutputDir
@@ -493,6 +633,7 @@ func prepareComponentSources(
 	mockProcessor *sources.MockProcessor,
 	comp components.Component,
 	stagingDir string,
+	compOutputDir string,
 ) (*preparedComponent, error) {
 	componentName := comp.GetName()
 
@@ -518,15 +659,10 @@ func prepareComponentSources(
 		return nil, fmt.Errorf("creating component staging directory:\n%w", mkdirErr)
 	}
 
-	// Prepare sources with overlays, skipping lookaside downloads.
-	// WithGitRepo preserves upstream .git and creates synthetic history so
-	// rpmautospec can expand %autorelease and %autochangelog correctly.
-	// WithSkipLookaside avoids expensive tarball downloads — only spec +
-	// sidecar files are needed for rendering.
-	preparerOpts := append(gitRepoPreparerOptions(env, distro),
-		sources.WithSkipLookaside(),
-		sources.WithUpstreamProvenance(sources.FedoraDistTag(distro.Ref.Name, distro.Version.ReleaseVer)),
-		sources.WithMockProcessor(mockProcessor),
+	var lockfileFreeState *lockfileFreeRenderState
+
+	preparerOpts := renderPreparerOptions(
+		env, mockProcessor, distro, compOutputDir, &lockfileFreeState,
 	)
 
 	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
@@ -544,10 +680,58 @@ func prepareComponentSources(
 		return nil, fmt.Errorf("finding spec file for %#q:\n%w", componentName, specErr)
 	}
 
+	if lockfileFreeState != nil {
+		if restoreErr := restoreProtectedSpecFields(
+			env.FS(), specPath, lockfileFreeState.protected,
+		); restoreErr != nil {
+			return nil, fmt.Errorf("restoring prepared Release and %%changelog for %#q:\n%w",
+				componentName, restoreErr)
+		}
+	}
+
 	return &preparedComponent{
-		comp:         comp,
-		specFilename: filepath.Base(specPath),
+		comp:              comp,
+		specFilename:      filepath.Base(specPath),
+		lockfileFreeState: lockfileFreeState,
 	}, nil
+}
+
+func renderPreparerOptions(
+	env *azldev.Env,
+	mockProcessor *sources.MockProcessor,
+	distro sourceproviders.ResolvedDistro,
+	compOutputDir string,
+	lockfileFreeState **lockfileFreeRenderState,
+) []sources.PreparerOption {
+	options := []sources.PreparerOption{sources.WithSkipLookaside()}
+
+	if env.WithoutLockfile() {
+		return append(options,
+			sources.WithPreserveGitDir(),
+			sources.WithPreOverlayHook(func(
+				ctx context.Context,
+				hookComp components.Component,
+				sourcesDirPath string,
+			) error {
+				var err error
+
+				*lockfileFreeState, err = prepareLockfileFreeRender(
+					ctx, env, hookComp, sourcesDirPath, compOutputDir,
+				)
+
+				return err
+			}),
+		)
+	}
+
+	options = append(options, gitRepoPreparerOptions(env, distro)...)
+
+	return append(options,
+		sources.WithUpstreamProvenance(
+			sources.FedoraDistTag(distro.Ref.Name, distro.Version.ReleaseVer),
+		),
+		sources.WithMockProcessor(mockProcessor),
+	)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -745,6 +929,7 @@ func finishComponentRender(
 			"component", componentName, "example", macro)
 	} else if filterErr := removeUnreferencedFiles(
 		env.FS(), componentDir, specPath, mockResult.SpecFiles, componentName,
+		env.WithoutLockfile(), prep.noChangeRebuild,
 	); filterErr != nil {
 		return false, fmt.Errorf("filtering unreferenced files for %#q:\n%w", componentName, filterErr)
 	}
@@ -920,12 +1105,28 @@ func findUnexpandedMacro(specFiles []string) string {
 
 // removeUnreferencedFiles removes files from the directory that aren't in the keep-list.
 // The keep-list is built from the spec file, the "sources" directory, and all
-// source/patch filenames provided. For paths with subdirectories (e.g., "patches/fix.patch"),
-// the top-level directory ("patches") is kept.
-func removeUnreferencedFiles(fs opctx.FS, tempDir, specPath string, specFiles []string, componentName string) error {
+// source/patch filenames provided. For paths with subdirectories (e.g.,
+// "patches/fix.patch"), the top-level directory ("patches") is kept.
+func removeUnreferencedFiles(
+	fs opctx.FS,
+	tempDir string,
+	specPath string,
+	specFiles []string,
+	componentName string,
+	preserveChangelog bool,
+	preserveNoChangeRebuild bool,
+) error {
 	keepSet := make(map[string]bool, len(specFiles))
 	keepSet[filepath.Base(specPath)] = true
+
 	keepSet["sources"] = true // lookaside hashes/signatures; always preserved
+	if preserveChangelog {
+		keepSet[changelogFilename] = true
+	}
+
+	if preserveNoChangeRebuild {
+		keepSet[noChangeRebuildFilename] = true
+	}
 
 	for _, f := range specFiles {
 		// Extract the first path component so subdirectory entries are preserved.

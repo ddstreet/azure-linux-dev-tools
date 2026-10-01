@@ -48,6 +48,14 @@ func TestNewRenderCmd_Flags(t *testing.T) {
 	checkOnlyFlag := cmd.Flags().Lookup("check-only")
 	require.NotNil(t, checkOnlyFlag, "check-only flag should be registered")
 	assert.Equal(t, "false", checkOnlyFlag.DefValue)
+
+	assert.Nil(t, cmd.Flags().Lookup("allow-no-change"),
+		"allow-no-change should not affect lockfile mode")
+
+	withoutLockfileCmd := componentcmds.NewRenderCmd(componentcmds.WithoutLockfileFlags())
+	allowNoChangeFlag := withoutLockfileCmd.Flags().Lookup("allow-no-change")
+	require.NotNil(t, allowNoChangeFlag, "allow-no-change flag should be registered")
+	assert.Equal(t, "false", allowNoChangeFlag.DefValue)
 }
 
 func TestRenderCmd_NoComponents(t *testing.T) {

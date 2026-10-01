@@ -121,7 +121,9 @@ func TestRemoveUnreferencedFiles(t *testing.T) {
 
 		specFiles := []string{"curl-8.0.tar.xz", "fix-build.patch"}
 
-		err := removeUnreferencedFiles(testFS, "/render", "/render/curl.spec", specFiles, "curl")
+		err := removeUnreferencedFiles(
+			testFS, "/render", "/render/curl.spec", specFiles, "curl", false, false,
+		)
 		require.NoError(t, err)
 
 		// Spec, sources in specFiles should remain.
@@ -146,7 +148,9 @@ func TestRemoveUnreferencedFiles(t *testing.T) {
 		require.NoError(t, fileutils.WriteFile(testFS, "/render/curl.spec", []byte("spec"), fileperms.PublicFile))
 		require.NoError(t, fileutils.WriteFile(testFS, "/render/sources/hashes", []byte("abc123"), fileperms.PublicFile))
 
-		err := removeUnreferencedFiles(testFS, "/render", "/render/curl.spec", nil, "curl")
+		err := removeUnreferencedFiles(
+			testFS, "/render", "/render/curl.spec", nil, "curl", false, false,
+		)
 		require.NoError(t, err)
 
 		exists, err := fileutils.Exists(testFS, "/render/sources/hashes")
@@ -165,7 +169,9 @@ func TestRemoveUnreferencedFiles(t *testing.T) {
 		// spectool reports "patches/fix.patch" -- top-level "patches" dir should be kept.
 		specFiles := []string{"patches/fix.patch"}
 
-		err := removeUnreferencedFiles(testFS, "/render", "/render/curl.spec", specFiles, "curl")
+		err := removeUnreferencedFiles(
+			testFS, "/render", "/render/curl.spec", specFiles, "curl", false, false,
+		)
 		require.NoError(t, err)
 
 		exists, err := fileutils.Exists(testFS, "/render/patches/fix.patch")
@@ -186,12 +192,86 @@ func TestRemoveUnreferencedFiles(t *testing.T) {
 
 		specFiles := []string{"curl-8.0.tar.xz"}
 
-		err := removeUnreferencedFiles(testFS, "/render", "/render/curl.spec", specFiles, "curl")
+		err := removeUnreferencedFiles(
+			testFS, "/render", "/render/curl.spec", specFiles, "curl", false, false,
+		)
 		require.NoError(t, err)
 
 		entries, err := fileutils.ReadDir(testFS, "/render")
 		require.NoError(t, err)
 		assert.Len(t, entries, 2, "both files should remain")
+	})
+
+	t.Run("preserves changelog only when requested", func(t *testing.T) {
+		for _, testCase := range []struct {
+			name              string
+			preserveChangelog bool
+			wantExists        bool
+		}{
+			{name: "lockfile mode", preserveChangelog: false, wantExists: false},
+			{name: "lockfile-free mode", preserveChangelog: true, wantExists: true},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				testFS := afero.NewMemMapFs()
+
+				require.NoError(t, fileutils.MkdirAll(testFS, "/render"))
+				require.NoError(t, fileutils.WriteFile(
+					testFS, "/render/curl.spec", []byte("spec"), fileperms.PublicFile,
+				))
+				require.NoError(t, fileutils.WriteFile(
+					testFS, "/render/changelog", []byte("history"), fileperms.PublicFile,
+				))
+
+				err := removeUnreferencedFiles(
+					testFS,
+					"/render",
+					"/render/curl.spec",
+					nil,
+					"curl",
+					testCase.preserveChangelog,
+					false,
+				)
+				require.NoError(t, err)
+
+				exists, existsErr := fileutils.Exists(testFS, "/render/changelog")
+				require.NoError(t, existsErr)
+				assert.Equal(t, testCase.wantExists, exists)
+			})
+		}
+	})
+
+	t.Run("preserves no-change rebuild marker only when requested", func(t *testing.T) {
+		for _, preserveMarker := range []bool{false, true} {
+			testFS := afero.NewMemMapFs()
+
+			require.NoError(t, fileutils.MkdirAll(testFS, "/render"))
+			require.NoError(t, fileutils.WriteFile(
+				testFS, "/render/curl.spec", []byte("spec"), fileperms.PublicFile,
+			))
+			require.NoError(t, fileutils.WriteFile(
+				testFS,
+				"/render/"+noChangeRebuildFilename,
+				[]byte("timestamp"),
+				fileperms.PublicFile,
+			))
+
+			err := removeUnreferencedFiles(
+				testFS,
+				"/render",
+				"/render/curl.spec",
+				nil,
+				"curl",
+				false,
+				preserveMarker,
+			)
+			require.NoError(t, err)
+
+			exists, existsErr := fileutils.Exists(
+				testFS, "/render/"+noChangeRebuildFilename,
+			)
+			require.NoError(t, existsErr)
+			assert.Equal(t, preserveMarker, exists)
+		}
 	})
 }
 
@@ -214,7 +294,9 @@ func TestSkipFileFilterPreservesAllFiles(t *testing.T) {
 	specFiles := []string{"57-%{fontpkgname1}.xml", "58-%{fontpkgname4}.xml"}
 
 	// Simulate skip-file-filter=false: XML files get removed.
-	err := removeUnreferencedFiles(testFS, "/render", "/render/pkg.spec", specFiles, "pkg")
+	err := removeUnreferencedFiles(
+		testFS, "/render", "/render/pkg.spec", specFiles, "pkg", false, false,
+	)
 	require.NoError(t, err)
 
 	for _, name := range []string{"57-pkg-fonts.xml", "58-pkg-lgc-fonts.xml"} {

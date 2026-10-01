@@ -4,12 +4,14 @@
 package sources_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components/components_testutils"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/testctx"
@@ -99,6 +101,75 @@ func TestPrepareSources_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(specContents), "%{load:%{_sourcedir}/"+macrosFileName+"}")
 	assert.NotContains(t, string(specContents), "Source9999")
+}
+
+func TestPrepareSources_PreOverlayHookPreservesGitMetadata(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+	sourceManager := sourceproviders_test.NewMockSourceManager(ctrl)
+	ctx := testctx.NewCtx()
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(&projectconfig.ComponentConfig{})
+	sourceManager.EXPECT().FetchComponent(
+		gomock.Any(), component, testOutputDir, gomock.Any(),
+	).DoAndReturn(func(
+		_ context.Context,
+		_ components.Component,
+		outputDir string,
+		options ...sourceproviders.FetchComponentOption,
+	) error {
+		var resolved sourceproviders.FetchComponentOptions
+		for _, option := range options {
+			option(&resolved)
+		}
+
+		assert.True(t, resolved.PreserveGitDir)
+
+		return fileutils.WriteFile(
+			ctx.FS(),
+			filepath.Join(outputDir, "test-component.spec"),
+			[]byte("# test spec"),
+			fileperms.PublicFile,
+		)
+	})
+	sourceManager.EXPECT().FetchFiles(
+		gomock.Any(), component, testOutputDir,
+	).DoAndReturn(func(_ context.Context, _ components.Component, outputDir string) error {
+		return fileutils.WriteFile(
+			ctx.FS(),
+			filepath.Join(outputDir, "fetched.marker"),
+			[]byte("ready"),
+			fileperms.PublicFile,
+		)
+	})
+
+	hookCalled := false
+	preparer, err := sources.NewPreparer(
+		sourceManager,
+		ctx.FS(),
+		ctx,
+		ctx,
+		sources.WithPreserveGitDir(),
+		sources.WithPreOverlayHook(func(
+			_ context.Context,
+			_ components.Component,
+			sourcesDirPath string,
+		) error {
+			hookCalled = true
+
+			exists, hookErr := fileutils.Exists(
+				ctx.FS(), filepath.Join(sourcesDirPath, "fetched.marker"),
+			)
+			require.NoError(t, hookErr)
+			assert.True(t, exists, "hook must run after FetchFiles")
+
+			return nil
+		}),
+	)
+	require.NoError(t, err)
+	require.NoError(t, preparer.PrepareSources(ctx, component, testOutputDir, true))
+	assert.True(t, hookCalled)
 }
 
 // TestPrepareSources_ArchiveOverlayRehashesSourcesEntry is an end-to-end check

@@ -125,6 +125,160 @@ func TestRenderWithConfiguredOutputDir(t *testing.T) {
 	assert.Contains(t, string(content), "Name: config-test")
 }
 
+func TestRenderWithoutLockfileCreatesAutoreleaseDistGitCommit(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skipping long test")
+	}
+
+	const placeholderCommit = "0000000000000000000000000000000000000000"
+
+	specContent := `Name: test-pkg
+Version: 1.0.0
+Release: %autorelease
+Summary: Lock-file-free render test
+License: MIT
+BuildArch: noarch
+
+%description
+Test package.
+
+%files
+
+%autochangelog
+`
+
+	distroConfig := `[distros.local-test]
+description = "Local test dist-git"
+default-version = "1.0"
+dist-git-base-uri = "file:///workdir/upstream-repo/$pkg.git"
+lookaside-base-uri = "file:///dev/null/$pkg/$filename/$hashtype/$hash/$filename"
+
+[distros.local-test.versions.'1.0']
+description = "Local test v1.0"
+release-ver = "1.0"
+dist-git-branch = "main"
+`
+
+	project := projecttest.NewDynamicTestProject(
+		projecttest.AddComponent(&projectconfig.ComponentConfig{
+			Name: "test-pkg",
+			Spec: projectconfig.SpecSource{
+				SourceType: projectconfig.SpecSourceTypeUpstream,
+				UpstreamDistro: projectconfig.DistroReference{
+					Name:    "local-test",
+					Version: "1.0",
+				},
+				UpstreamCommit: placeholderCommit,
+			},
+		}),
+		projecttest.UseTestDefaultConfigs(),
+		projecttest.AddFile("local-distro.toml", distroConfig),
+		projecttest.AddFile("upstream-spec.txt", specContent),
+		projecttest.WithRenderedSpecsDir("SPECS"),
+		projecttest.WithGitRepo(),
+	)
+
+	projectStagingDir := t.TempDir()
+	project.Serialize(t, projectStagingDir)
+
+	azldevToml, err := os.ReadFile(filepath.Join(projectStagingDir, "azldev.toml"))
+	require.NoError(t, err)
+
+	patched := strings.Replace(
+		string(azldevToml),
+		"includes = [",
+		"includes = [\"local-distro.toml\", ",
+		1,
+	)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(projectStagingDir, "azldev.toml"), []byte(patched), 0o644,
+	))
+
+	addCmd := exec.CommandContext(t.Context(), "git", "add", "azldev.toml")
+	addCmd.Dir = projectStagingDir
+	addOutput, err := addCmd.CombinedOutput()
+	require.NoError(t, err, "git add failed: %s", string(addOutput))
+
+	amendCmd := exec.CommandContext(t.Context(), "git", "commit", "--amend", "--no-edit")
+	amendCmd.Dir = projectStagingDir
+	amendOutput, err := amendCmd.CombinedOutput()
+	require.NoError(t, err, "git amend failed: %s", string(amendOutput))
+
+	testScript := `
+set -ex
+
+WORK=$(mktemp -d)
+cd "$WORK"
+git init -b main
+git config user.email "upstream@example.com"
+git config user.name "Upstream"
+cp /workdir/project/upstream-spec.txt test-pkg.spec
+git add test-pkg.spec
+git -c commit.gpgsign=false commit -m "Initial upstream import"
+HEAD_COMMIT=$(git rev-parse HEAD)
+
+mkdir -p /workdir/upstream-repo
+git clone --bare "$WORK" /workdir/upstream-repo/test-pkg.git
+
+cd /workdir/project
+sed -i "s/` + placeholderCommit + `/$HEAD_COMMIT/" azldev.toml
+
+azldev --without-lockfile -O json component render test-pkg > /workdir/result.json
+
+FIRST_RENDER_COMMIT=$(git rev-parse HEAD)
+azldev --without-lockfile -O json component render test-pkg \
+    > /workdir/unchanged-result.json 2> /workdir/unchanged-warning.txt
+test "$(git rev-parse HEAD)" = "$FIRST_RENDER_COMMIT"
+
+azldev --without-lockfile -O json component render test-pkg --allow-no-change \
+    > /workdir/rebuild-result.json
+
+git status --porcelain > /workdir/git-status.txt
+git log -1 --format=%B > /workdir/git-message.txt
+`
+
+	scenarioTest := cmdtest.NewScenarioTest().
+		WithScript(strings.NewReader(testScript)).
+		AddDirRecursive(t, "project", projectStagingDir).
+		AddDirRecursive(t, projecttest.TestDefaultConfigsSubdir, projecttest.TestDefaultConfigsDir())
+
+	testResults, err := scenarioTest.InContainer().WithNetwork().Run(t)
+	require.NoError(t, err)
+	testResults.AssertZeroExitCode(t)
+
+	renderedDir := filepath.Join(testResults.Workdir, "project", "SPECS", "t", "test-pkg")
+	renderedSpec := filepath.Join(renderedDir, "test-pkg.spec")
+	require.FileExists(t, renderedSpec)
+	require.FileExists(t, filepath.Join(renderedDir, "changelog"))
+	require.FileExists(t, filepath.Join(renderedDir, ".no_change_rebuild"))
+
+	content, err := os.ReadFile(renderedSpec)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "Release: %autorelease -b 1")
+	assert.Contains(t, string(content), "%autochangelog")
+	assert.NotContains(t, string(content), "## START: Set by rpmautospec")
+
+	status, err := os.ReadFile(filepath.Join(testResults.Workdir, "git-status.txt"))
+	require.NoError(t, err)
+	assert.Empty(t, strings.TrimSpace(string(status)))
+
+	message, err := os.ReadFile(filepath.Join(testResults.Workdir, "git-message.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "Update test-pkg", strings.TrimSpace(string(message)))
+
+	warning, err := os.ReadFile(filepath.Join(testResults.Workdir, "unchanged-warning.txt"))
+	require.NoError(t, err)
+	assert.Contains(t, string(warning), "has not changed and no rendering is needed")
+
+	marker, err := os.ReadFile(filepath.Join(renderedDir, ".no_change_rebuild"))
+	require.NoError(t, err)
+	assert.Regexp(t,
+		regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$`),
+		strings.TrimSpace(string(marker)))
+}
+
 func TestRenderWithOverlayApplied(t *testing.T) {
 	t.Parallel()
 
