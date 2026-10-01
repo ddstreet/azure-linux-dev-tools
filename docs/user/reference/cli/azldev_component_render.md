@@ -27,11 +27,12 @@ generate-changelog' and %autochangelog; auto detects %autorelease or otherwise
 runs rpmdev-bumpspec. Render never runs these tools in mock.
 
 In --without-lockfile mode, rendering uses host-installed rpmautospec,
-rpmdev-bumpspec, and spectool instead of synthetic git history. Each changed
-component directory is committed automatically together with its generated
-upstream-commit TOML. Components whose committed inputs have not changed since
-their rendered directory was last updated are skipped. Pass --allow-no-change
-to force a rebuild and write a .no_change_rebuild timestamp marker.
+rpmdev-bumpspec, rpmspec, and spectool instead of synthetic git history. Each
+changed component directory is committed automatically together with its
+generated upstream-commit TOML. Components whose committed inputs have not
+changed since their rendered directory was last updated are skipped. Pass
+--allow-no-change to force a rebuild and write a .no_change_rebuild timestamp
+marker.
 
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,10 @@ import (
 const (
 	changelogFilename       = "changelog"
 	noChangeRebuildFilename = ".no_change_rebuild"
+	rpmautospecProcessedTag = "RPMAUTOSPEC: autorelease, autochangelog"
+	rpmspecChangelogFormat  = "[* %{CHANGELOGTIME:date} %{CHANGELOGNAME}\n%{CHANGELOGTEXT}\n\n]"
+	rpmspecNoChangelogTrim  = "_changelog_trimage 0"
+	autoreleaseShellInput   = "%autorelease -n\n"
 )
 
 var (
@@ -389,11 +394,37 @@ func initializeAutoreleaseSpec(
 		return nil
 	}
 
-	if err := preserveAutoreleaseChangelog(env.FS(), existingDistGitDir, workingDir); err != nil {
+	existingSpecPath := filepath.Join(existingDistGitDir, filepath.Base(specPath))
+
+	processed, err := specContainsRpmautospecProcessedTag(env.FS(), existingSpecPath)
+	if err != nil {
 		return err
 	}
 
-	existingSpecPath := filepath.Join(existingDistGitDir, filepath.Base(specPath))
+	if processed {
+		existingRelease, err := extractProcessedAutoreleaseState(
+			ctx, env, existingSpecPath, existingDistGitDir, workingDir,
+		)
+		if err != nil {
+			return err
+		}
+
+		currentRelease, err := sources.GetReleaseTagValue(env.FS(), specPath)
+		if err != nil {
+			return fmt.Errorf("reading new autorelease value:\n%w", err)
+		}
+
+		updatedRelease, err := setAutoreleaseBase(currentRelease, existingRelease)
+		if err != nil {
+			return err
+		}
+
+		return setReleaseTag(env.FS(), specPath, updatedRelease)
+	}
+
+	if err := preserveAutoreleaseChangelog(env.FS(), existingDistGitDir, workingDir); err != nil {
+		return err
+	}
 
 	existingRelease, err := sources.GetReleaseTagValue(env.FS(), existingSpecPath)
 	if err != nil {
@@ -401,6 +432,107 @@ func initializeAutoreleaseSpec(
 	}
 
 	return setReleaseTag(env.FS(), specPath, existingRelease)
+}
+
+func specContainsRpmautospecProcessedTag(fs opctx.FS, specPath string) (bool, error) {
+	content, err := fileutils.ReadFile(fs, specPath)
+	if err != nil {
+		return false, fmt.Errorf("reading existing spec %#q:\n%w", specPath, err)
+	}
+
+	return bytes.Contains(content, []byte(rpmautospecProcessedTag)), nil
+}
+
+func extractProcessedAutoreleaseState(
+	ctx context.Context,
+	env *azldev.Env,
+	existingSpecPath string,
+	existingDistGitDir string,
+	workingDir string,
+) (string, error) {
+	changelog, err := runRenderHostCommandRaw(
+		ctx,
+		env,
+		"rpmspec",
+		"--srpm",
+		"-D",
+		"_sourcedir "+existingDistGitDir,
+		"-D",
+		rpmspecNoChangelogTrim,
+		"-q",
+		"--qf",
+		rpmspecChangelogFormat,
+		existingSpecPath,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	changelogPath := filepath.Join(workingDir, changelogFilename)
+	if err := fileutils.WriteFile(
+		env.FS(), changelogPath, []byte(changelog), fileperms.PublicFile,
+	); err != nil {
+		return "", fmt.Errorf("writing extracted changelog %#q:\n%w", changelogPath, err)
+	}
+
+	release, err := queryProcessedAutoreleaseRelease(
+		ctx, env, existingSpecPath, existingDistGitDir,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return release, nil
+}
+
+func queryProcessedAutoreleaseRelease(
+	ctx context.Context,
+	cmdFactory opctx.CmdFactory,
+	existingSpecPath string,
+	existingDistGitDir string,
+) (string, error) {
+	const commandName = "rpmspec"
+
+	if !cmdFactory.CommandInSearchPath(commandName) {
+		return "", fmt.Errorf("required command %#q was not found in PATH", commandName)
+	}
+
+	args := []string{
+		"-D",
+		"_sourcedir " + existingDistGitDir,
+		"--shell",
+		existingSpecPath,
+	}
+	rawCmd := exec.CommandContext(ctx, commandName, args...)
+	rawCmd.Stdin = strings.NewReader(autoreleaseShellInput)
+	rawCmd.Stderr = io.Discard
+
+	cmd, err := cmdFactory.Command(rawCmd)
+	if err != nil {
+		return "", fmt.Errorf("creating command '%s %s':\n%w",
+			commandName, strings.Join(args, " "), err)
+	}
+
+	output, err := cmd.RunAndGetOutput(ctx)
+	if err != nil {
+		return "", fmt.Errorf("command '%s %s' failed:\n%w",
+			commandName, strings.Join(args, " "), err)
+	}
+
+	var releaseLines []string
+
+	for line := range strings.SplitSeq(output, "\n") {
+		if !strings.HasPrefix(line, ">") {
+			releaseLines = append(releaseLines, line)
+		}
+	}
+
+	release := strings.TrimSpace(strings.Join(releaseLines, "\n"))
+	if release == "" {
+		return "", errors.New("rpmspec returned an empty existing autorelease value")
+	}
+
+	return release, nil
 }
 
 func preserveAutoreleaseChangelog(
@@ -742,6 +874,17 @@ func runRenderHostCommand(
 	name string,
 	args ...string,
 ) (string, error) {
+	output, err := runRenderHostCommandRaw(ctx, cmdFactory, name, args...)
+
+	return strings.TrimSpace(output), err
+}
+
+func runRenderHostCommandRaw(
+	ctx context.Context,
+	cmdFactory opctx.CmdFactory,
+	name string,
+	args ...string,
+) (string, error) {
 	if !cmdFactory.CommandInSearchPath(name) {
 		return "", fmt.Errorf("required command %#q was not found in PATH", name)
 	}
@@ -763,7 +906,7 @@ func runRenderHostCommand(
 			name, strings.Join(args, " "), stderr.String(), err)
 	}
 
-	return strings.TrimSpace(output), nil
+	return output, nil
 }
 
 func processSpecFilesOnHost(

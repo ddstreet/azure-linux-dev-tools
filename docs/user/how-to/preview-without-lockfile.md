@@ -85,9 +85,9 @@ generated upstream-commit TOML and changed rendered dist-git directory together.
 
 ## Render Components
 
-Lock-file-free rendering requires `rpmautospec`, `rpmdev-bumpspec`, and
-`spectool` on the host. It does not create synthetic git history or use mock for
-release and changelog preparation.
+Lock-file-free rendering requires `rpmautospec`, `rpmdev-bumpspec`, `rpmspec`,
+and `spectool` on the host. It does not create synthetic git history or use mock
+for release and changelog preparation.
 
 Before rendering an existing component, azldev parses the project TOML at the
 current commit and at the commit that most recently changed the component's
@@ -113,6 +113,10 @@ For an upstream component, render:
 2. Preserves the existing rendered release and changelog state when appropriate.
 3. When `%autorelease` is used, creates or preserves the `changelog` file and
    sets `%autorelease -b` from `rpmautospec calculate-release --number-only`.
+   During migration from lockfile rendering, if the existing rendered spec has
+   already been expanded by rpmautospec, render uses host `rpmspec` to recover
+   its autorelease value and full, untrimmed changelog before replacing the
+   directory.
 4. For static releases, runs `rpmdev-bumpspec`. When the upstream commit moved,
    the changelog message includes `git log --oneline` output for the upstream
    range.

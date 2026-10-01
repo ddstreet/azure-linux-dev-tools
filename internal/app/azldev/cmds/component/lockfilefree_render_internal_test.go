@@ -5,6 +5,7 @@ package component
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -128,6 +129,155 @@ func TestPrepareLockfileFreeRender_FirstAutorelease(t *testing.T) {
 		string(changelog))
 	assert.Equal(t, "Update curl", state.commitMessage)
 	assert.Len(t, calls, 2)
+}
+
+func TestPrepareAutoreleaseSpec_ExistingProcessedSpec(t *testing.T) {
+	for _, testCase := range []struct {
+		name            string
+		initialRelease  string
+		upstreamChanged bool
+		expectedRelease string
+	}{
+		{
+			name:            "unchanged upstream uses extracted autorelease base",
+			initialRelease:  "%autorelease",
+			upstreamChanged: false,
+			expectedRelease: "%autorelease -b 1",
+		},
+		{
+			name:            "unchanged upstream replaces existing autorelease base",
+			initialRelease:  "%autorelease -b 99 -p",
+			upstreamChanged: false,
+			expectedRelease: "%autorelease -b 1 -p",
+		},
+		{
+			name:            "changed upstream recalculates autorelease base",
+			initialRelease:  "%autorelease",
+			upstreamChanged: true,
+			expectedRelease: "%autorelease -b 8",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			testEnv := testutils.NewTestEnvWithoutLockfile(t)
+			testEnv.CmdFactory.RegisterCommandInSearchPath("rpmspec")
+
+			if testCase.upstreamChanged {
+				testEnv.CmdFactory.RegisterCommandInSearchPath("rpmautospec")
+			}
+
+			const (
+				workingDir         = "/work/curl"
+				existingDistGitDir = "/specs/c/curl"
+			)
+
+			specPath := writeTestSpec(
+				t, testEnv, testCase.initialRelease, "%autochangelog\n",
+			)
+			require.NoError(t, fileutils.MkdirAll(testEnv.TestFS, existingDistGitDir))
+
+			existingSpecPath := filepath.Join(existingDistGitDir, "curl.spec")
+			processedSpec := strings.Join([]string{
+				"Name: curl",
+				"Version: 1",
+				"Release: 7.azl3",
+				"# RPMAUTOSPEC: autorelease, autochangelog",
+				"",
+				"%description",
+				"test",
+				"",
+				"%changelog",
+				"* Tue Jan 01 2026 Existing <existing@example.com> - 1-7",
+				"- Existing change",
+				"",
+			}, "\n")
+			require.NoError(t, fileutils.WriteFile(
+				testEnv.TestFS,
+				existingSpecPath,
+				[]byte(processedSpec),
+				fileperms.PublicFile,
+			))
+			require.NoError(t, fileutils.WriteFile(
+				testEnv.TestFS,
+				filepath.Join(workingDir, changelogFilename),
+				[]byte("stale changelog\n"),
+				fileperms.PublicFile,
+			))
+
+			const extractedChangelog = "* Tue Jan 01 2026 Existing <existing@example.com>\n" +
+				"- Existing change\n\n"
+
+			var calls [][]string
+
+			testEnv.CmdFactory.RunAndGetOutputHandler = func(cmd *exec.Cmd) (string, error) {
+				calls = append(calls, cmd.Args)
+
+				switch {
+				case cmd.Args[0] == "rpmspec" && cmd.Args[3] == "--shell":
+					stdin, err := io.ReadAll(cmd.Stdin)
+					require.NoError(t, err)
+					assert.Equal(t, autoreleaseShellInput, string(stdin))
+					assert.Equal(t, io.Discard, cmd.Stderr)
+
+					return "> \n1\n> \n", nil
+				case cmd.Args[0] == "rpmspec" && cmd.Args[8] == rpmspecChangelogFormat:
+					return extractedChangelog, nil
+				case cmd.Args[0] == "rpmautospec":
+					return "Calculated release number: 8", nil
+				default:
+					t.Fatalf("unexpected command: %v", cmd.Args)
+
+					return "", nil
+				}
+			}
+
+			err := prepareAutoreleaseSpec(
+				context.Background(),
+				testEnv.Env,
+				specPath,
+				workingDir,
+				existingDistGitDir,
+				true,
+				testCase.upstreamChanged,
+			)
+			require.NoError(t, err)
+
+			release, err := sources.GetReleaseTagValue(testEnv.TestFS, specPath)
+			require.NoError(t, err)
+			assert.Equal(t, testCase.expectedRelease, release)
+
+			changelog, err := fileutils.ReadFile(
+				testEnv.TestFS, filepath.Join(workingDir, changelogFilename),
+			)
+			require.NoError(t, err)
+			assert.Equal(t, extractedChangelog, string(changelog))
+
+			expectedCallCount := 2
+			if testCase.upstreamChanged {
+				expectedCallCount++
+			}
+
+			assert.Len(t, calls, expectedCallCount)
+			assert.Equal(t, []string{
+				"rpmspec",
+				"--srpm",
+				"-D",
+				"_sourcedir " + existingDistGitDir,
+				"-D",
+				rpmspecNoChangelogTrim,
+				"-q",
+				"--qf",
+				rpmspecChangelogFormat,
+				existingSpecPath,
+			}, calls[0])
+			assert.Equal(t, []string{
+				"rpmspec",
+				"-D",
+				"_sourcedir " + existingDistGitDir,
+				"--shell",
+				existingSpecPath,
+			}, calls[1])
+		})
+	}
 }
 
 func TestPrepareLockfileFreeRender_FirstStaticRelease(t *testing.T) {
