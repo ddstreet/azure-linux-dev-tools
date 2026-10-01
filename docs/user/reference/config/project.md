@@ -28,6 +28,10 @@ The `log-dir`, `work-dir`, `output-dir`, and `rendered-specs-dir` paths are reso
 
 > **Tip:** To keep these directories out of every project checkout, override them in the [user-level config file](../../explanation/config-system.md#keeping-build-output-out-of-the-checkout).
 
+In `--without-lockfile` mode, a changed component directory is committed
+automatically. For upstream components, the generated upstream-commit TOML is
+included in the same commit.
+
 > **Note:** Do not edit files under these directories manually — they are managed by azldev and may be overwritten or cleaned at any time.
 
 ## Default Distro

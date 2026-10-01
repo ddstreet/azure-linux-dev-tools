@@ -154,6 +154,17 @@ func upstreamCommitAtCommit(
 	return component.Spec.UpstreamCommit, nil
 }
 
+// UpstreamCommitAtCommit reads a component's pinned upstream commit from a
+// project config file as it existed at commitHash.
+func UpstreamCommitAtCommit(
+	repo *gogit.Repository,
+	commitHash string,
+	configFileRelPath string,
+	componentName string,
+) (string, error) {
+	return upstreamCommitAtCommit(repo, commitHash, configFileRelPath, componentName)
+}
+
 // buildUpstreamCommitSyntheticCommits resolves the project repository from the
 // config file that pinned the component's upstream commit and returns that file's
 // upstream-commit changes chronologically. Returns (nil, nil) when there is no

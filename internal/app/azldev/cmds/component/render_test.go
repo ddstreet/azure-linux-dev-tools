@@ -55,6 +55,14 @@ func TestNewRenderCmd_Flags(t *testing.T) {
 	assert.Equal(t, "Use rpmdev-bumpspec instead of the legacy static release calculation", rpmDevBumpspecFlag.Usage)
 
 	assert.Nil(t, componentcmds.NewDiffSourcesCmd().Flags().Lookup("rpmdev-bumpspec"))
+
+	assert.Nil(t, cmd.Flags().Lookup("allow-no-change"),
+		"allow-no-change should not affect lockfile mode")
+
+	withoutLockfileCmd := componentcmds.NewRenderCmd(componentcmds.WithoutLockfileFlags())
+	allowNoChangeFlag := withoutLockfileCmd.Flags().Lookup("allow-no-change")
+	require.NotNil(t, allowNoChangeFlag, "allow-no-change flag should be registered")
+	assert.Equal(t, "false", allowNoChangeFlag.DefValue)
 }
 
 func TestRenderCmd_NoComponents(t *testing.T) {

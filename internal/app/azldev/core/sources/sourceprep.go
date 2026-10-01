@@ -60,12 +60,12 @@ type SourcePreparer interface {
 // PreparerOption is a functional option for configuring a [SourcePreparer].
 type PreparerOption func(*sourcePreparerImpl)
 
-// BeforeOverlaysFunc runs after pristine component sources have been fetched
-// and before any generated or configured overlays modify them.
-type BeforeOverlaysFunc func(
+// PreOverlayHook runs after component files are fetched but before overlays and
+// generated source-file updates are applied.
+type PreOverlayHook func(
 	ctx context.Context,
 	component components.Component,
-	outputDir string,
+	sourcesDirPath string,
 ) error
 
 // WithGitRepo returns a [PreparerOption] that enables dist-git repository
@@ -105,20 +105,19 @@ func WithRPMDevBumpspec(ctx opctx.Ctx, scratchDir, targetArch string) PreparerOp
 	}
 }
 
-// WithPreserveGitRepo returns a [PreparerOption] that preserves the upstream
-// '.git' directory without creating synthetic history. This is used when a
-// caller needs the original dist-git history temporarily.
-func WithPreserveGitRepo() PreparerOption {
+// WithPreserveGitDir preserves the fetched upstream '.git' directory without
+// enabling synthetic-history generation.
+func WithPreserveGitDir() PreparerOption {
 	return func(p *sourcePreparerImpl) {
-		p.preserveGitRepo = true
+		p.preserveGitDir = true
 	}
 }
 
-// WithBeforeOverlays returns a [PreparerOption] that invokes callback after
-// fetching pristine sources and before applying overlays.
-func WithBeforeOverlays(callback BeforeOverlaysFunc) PreparerOption {
+// WithPreOverlayHook registers work that must run after source fetching and
+// before normal overlay processing.
+func WithPreOverlayHook(hook PreOverlayHook) PreparerOption {
 	return func(p *sourcePreparerImpl) {
-		p.beforeOverlays = callback
+		p.preOverlayHook = hook
 	}
 }
 
@@ -219,9 +218,12 @@ type sourcePreparerImpl struct {
 	// upstream .git directory and generating synthetic commit history.
 	withGitRepo bool
 
-	// preserveGitRepo, when true, preserves the upstream .git directory without
-	// enabling synthetic history.
-	preserveGitRepo bool
+	// preserveGitDir keeps upstream git metadata without generating synthetic
+	// history. It is used by lock-file-free rendering.
+	preserveGitDir bool
+
+	// preOverlayHook performs component-specific preparation before overlays.
+	preOverlayHook PreOverlayHook
 
 	// skipLookaside, when true, skips all lookaside cache downloads during
 	// source preparation. Git-tracked files are still fetched.
@@ -268,10 +270,6 @@ type sourcePreparerImpl struct {
 	bumpspecCtx        opctx.Ctx
 	bumpspecScratchDir string
 	bumpspecTargetArch string
-
-	// beforeOverlays runs against the pristine fetched checkout before generated
-	// or configured overlays modify it.
-	beforeOverlays BeforeOverlaysFunc
 }
 
 // NewPreparer creates a new [SourcePreparer] instance. All positional arguments
@@ -313,10 +311,6 @@ func NewPreparer(
 		}
 	}
 
-	if impl.withGitRepo {
-		impl.preserveGitRepo = true
-	}
-
 	if impl.dirtyDetection && !impl.withGitRepo {
 		return nil, errors.New("WithDirtyDetection requires WithGitRepo; " +
 			"dirty detection compares fingerprints against committed lock files in the git history")
@@ -340,16 +334,9 @@ func (p *sourcePreparerImpl) PrepareSources(
 		}
 	}
 
-	// Preserve the upstream '.git' directory when synthetic history or another
-	// caller needs the original dist-git history.
-	var fetchOpts []sourceproviders.FetchComponentOption
-	if applyOverlays && p.preserveGitRepo {
-		fetchOpts = append(fetchOpts, sourceproviders.WithPreserveGitDir())
-	}
-
-	if p.skipLookaside {
-		fetchOpts = append(fetchOpts, sourceproviders.WithSkipLookaside())
-	}
+	// Preserve upstream git metadata when synthetic history or another
+	// pre-overlay dist-git operation requires it.
+	fetchOpts := p.fetchComponentOptions(applyOverlays)
 
 	// Fetch the component first (spec, sidecar files, and upstream source tarballs).
 	err := p.sourceManager.FetchComponent(ctx, component, outputDir, fetchOpts...)
@@ -366,11 +353,27 @@ func (p *sourcePreparerImpl) PrepareSources(
 		}
 	}
 
-	fingerprintConfig, err := p.prepareOverlays(
-		ctx, component, outputDir, applyOverlays,
-	)
-	if err != nil {
+	if err := p.runPreOverlayHook(ctx, component, outputDir); err != nil {
 		return err
+	}
+
+	fingerprintConfig := component.GetConfig()
+
+	if applyOverlays {
+		repackedArchives, err := p.applyOverlaysToSources(ctx, component, outputDir)
+		if err != nil {
+			return err
+		}
+
+		fingerprintConfig, err = p.updateSourcesFile(component, outputDir, repackedArchives)
+		if err != nil {
+			return fmt.Errorf("failed to update 'sources' file for component %#q:\n%w",
+				component.GetName(), err)
+		}
+	} else {
+		slog.Warn("Sources prepared without applying overlays;"+
+			" 'sources' file will not include entries from the 'source-files' configuration",
+			"component", component.GetName())
 	}
 
 	// Record the changes as synthetic git history when dist-git creation is enabled.
@@ -384,39 +387,36 @@ func (p *sourcePreparerImpl) PrepareSources(
 	return nil
 }
 
-func (p *sourcePreparerImpl) prepareOverlays(
+func (p *sourcePreparerImpl) fetchComponentOptions(
+	applyOverlays bool,
+) []sourceproviders.FetchComponentOption {
+	var options []sourceproviders.FetchComponentOption
+	if applyOverlays && (p.withGitRepo || p.preserveGitDir) {
+		options = append(options, sourceproviders.WithPreserveGitDir())
+	}
+
+	if p.skipLookaside {
+		options = append(options, sourceproviders.WithSkipLookaside())
+	}
+
+	return options
+}
+
+func (p *sourcePreparerImpl) runPreOverlayHook(
 	ctx context.Context,
 	component components.Component,
 	outputDir string,
-	applyOverlays bool,
-) (*projectconfig.ComponentConfig, error) {
-	if !applyOverlays {
-		slog.Warn("Sources prepared without applying overlays;"+
-			" 'sources' file will not include entries from the 'source-files' configuration",
-			"component", component.GetName())
-
-		return component.GetConfig(), nil
+) error {
+	if p.preOverlayHook == nil {
+		return nil
 	}
 
-	if p.beforeOverlays != nil {
-		if err := p.beforeOverlays(ctx, component, outputDir); err != nil {
-			return nil, fmt.Errorf("running pre-overlay processing for component %#q:\n%w",
-				component.GetName(), err)
-		}
-	}
-
-	repackedArchives, err := p.applyOverlaysToSources(ctx, component, outputDir)
-	if err != nil {
-		return nil, err
-	}
-
-	fingerprintConfig, err := p.updateSourcesFile(component, outputDir, repackedArchives)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update 'sources' file for component %#q:\n%w",
+	if err := p.preOverlayHook(ctx, component, outputDir); err != nil {
+		return fmt.Errorf("running pre-overlay preparation for component %#q:\n%w",
 			component.GetName(), err)
 	}
 
-	return fingerprintConfig, nil
+	return nil
 }
 
 func (p *sourcePreparerImpl) validateArchiveOverlayConfig(component components.Component) error {

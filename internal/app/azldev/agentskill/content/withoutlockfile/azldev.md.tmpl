@@ -27,8 +27,8 @@ images assemble RPMs into bootable artifacts.
   you customize upstream without forking it.
 - **Distro** — a named build target (`*.distro.toml`) with upstream URIs, release
   versions, and build inputs.
-- **Rendered spec** — the generated `.spec` after overlays; a build input, never
-  hand-edited.
+- **Rendered dist-git** — the generated spec and sidecar directory after overlays;
+  a build input committed automatically by `comp render`, never hand-edited.
 - **Upstream commit config** — generated component TOML pinning the resolved upstream commit.
 
 ## Common commands
@@ -71,6 +71,12 @@ mock helpers; it is intentionally omitted from normal help.
 
 - **Never edit generated output** — rendered specs and the output/work/log dirs are
   produced by azldev. Change the source config and re-render.
+- **Expect render commits** — in this mode, `comp render` commits each changed
+  rendered component directory and its generated upstream-commit TOML.
+- **Unchanged renders are skipped** — `comp render` compares committed component
+  inputs with the last rendered dist-git commit. Use `--allow-no-change` only
+  when an intentional rebuild is required; it records a `.no_change_rebuild`
+  timestamp in the rendered directory.
 - **Refresh upstream commits after source-resolution changes** — run `azldev comp refresh-upstream-commit` after
   changing a commit pin, upstream distro/version, or snapshot.
 - **Every overlay needs a `description`** explaining why the change is needed.
