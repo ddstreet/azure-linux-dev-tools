@@ -30,7 +30,7 @@ command name. `--without-lockfile=false` explicitly selects the default mode.
 | Inspecting resolved state | `azldev component history`, `azldev component query` | read the generated TOML; no equivalent commands |
 | Lock consistency checks | On, with `--skip-lock-validation` to opt out | Not applicable; the flag is not registered |
 | `component changed` | Compares stored input fingerprints | Compares project configuration resolved at each ref |
-| `component render` history | Synthetic commits derived from lock-file fingerprint changes | No synthetic commits; generated TOML history is not inspected |
+| Rendered dist-git history | Synthetic history derived from lock-file fingerprint changes | Replaced directly from local content or a fresh upstream clone |
 | Agent skills and MCP tools | Describe the lock-file workflow | Describe the upstream-commit workflow |
 
 `component update`, `component history`, and `component query` remain registered
@@ -80,27 +80,51 @@ resolved components are created or updated before the command exits with an
 error. Failed components remain unchanged, and orphan pruning is skipped for
 that run.
 
-Commit the refreshed TOML together with the rendered output. In lock-file-free
-mode, `component render` does not inspect the generated TOML's git history or
-create synthetic commits. Release and changelog handling is instead based on
-the component source type and `release.calculation`:
+Run `component render` after refreshing. In preview mode, render commits the
+generated upstream-commit TOML and changed rendered dist-git directory together.
 
-- Local components preserve their `Release` and changelog. `static` is not
-  supported; `auto` preserves `%autorelease` and otherwise behaves as `manual`.
-- Upstream `manual` components preserve their `Release` and changelog.
-- Upstream `autorelease` components, including `auto` components whose
-  `Release` uses `%autorelease`, are initialized only when their rendered
-  dist-git dir is absent from `HEAD`. Initialization generates changelog history
-  from the pristine upstream checkout, before overlays can make it dirty, then
-  writes that history to `changelog` and sets the rendered spec's `%changelog`
-  body to `%autochangelog`.
-- Upstream `auto` components without `%autorelease` are updated with
-  `rpmdev-bumpspec`. The changelog identity and date come from the project
-  `HEAD` commit, making repeated renders independent of host RPM configuration
-  and wall-clock time.
+## Render Components
 
-The `rpmautospec` and `rpmdev-bumpspec` commands run directly on the host, never in
-mock. Explicit `static` calculation is unsupported in lock-file-free render.
+Lock-file-free rendering requires `rpmautospec`, `rpmdev-bumpspec`, and
+`spectool` on the host. It does not create synthetic git history or use mock for
+release and changelog preparation.
+
+Before rendering an existing component, azldev parses the project TOML at the
+current commit and at the commit that most recently changed the component's
+rendered dist-git directory. If the resolved build inputs are unchanged, render
+prints a warning, skips the component, and exits successfully. Commit component
+configuration and overlay-source changes before rendering so they are included
+in this comparison.
+
+Use `--allow-no-change` to force an unchanged component to render. The forced
+render writes the output of `date -Is` to
+`<rendered-specs-dir>/<letter>/<component>/.no_change_rebuild`, replacing the
+file when it already exists. The marker ensures the rebuild is recorded in the
+rendered dist-git commit.
+
+For a local component, render copies the configured local content, applies the
+normal overlays and transformations, and replaces
+`<rendered-specs-dir>/<letter>/<component>/`.
+
+For an upstream component, render:
+
+1. Clones the configured upstream dist-git branch and checks out the generated
+   `upstream-commit`.
+2. Preserves the existing rendered release and changelog state when appropriate.
+3. When `%autorelease` is used, creates or preserves the `changelog` file and
+   sets `%autorelease -b` from `rpmautospec calculate-release --number-only`.
+4. For static releases, runs `rpmdev-bumpspec`. When the upstream commit moved,
+   the changelog message includes `git log --oneline` output for the upstream
+   range.
+5. Applies overlays while preserving the release and `%changelog` prepared
+   above.
+6. Replaces the rendered component directory and commits it. For upstream
+   components, the generated upstream-commit TOML is included in the same
+   commit.
+
+The temporary commit message is `Update <component>`, followed by the upstream
+change messages when available. A later change will replace this with richer
+project-derived messages.
 
 ## Detect Changed Components
 

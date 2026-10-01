@@ -26,6 +26,10 @@ The `log-dir`, `work-dir`, `output-dir`, and `rendered-specs-dir` paths are reso
 - **`output-dir`** — final build artifacts (RPMs, SRPMs) are placed here
 - **`rendered-specs-dir`** — rendered dist-git dirs are written here by `azldev component render`. Components are organized into letter-prefixed subdirectories (e.g., `SPECS/c/curl`, `SPECS/v/vim`)
 
+In `--without-lockfile` mode, a changed component directory is committed
+automatically. For upstream components, the generated upstream-commit TOML is
+included in the same commit.
+
 > **Note:** Do not edit files under these directories manually — they are managed by azldev and may be overwritten or cleaned at any time.
 
 ## Default Distro
