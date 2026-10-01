@@ -70,11 +70,12 @@ lookaside cache — only spec files, patches, scripts, and other git-tracked
 sidecar files are included. Multiple components can be rendered at once.
 
 In --without-lockfile mode, rendering uses host-installed rpmautospec,
-rpmdev-bumpspec, and spectool instead of synthetic git history. Each changed
-component directory is committed automatically together with its generated
-upstream-commit TOML. Components whose committed inputs have not changed since
-their rendered directory was last updated are skipped. Pass --allow-no-change
-to force a rebuild and write a .no_change_rebuild timestamp marker.
+rpmdev-bumpspec, rpmspec, and spectool instead of synthetic git history. Each
+changed component directory is committed automatically together with its
+generated upstream-commit TOML. Components whose committed inputs have not
+changed since their rendered directory was last updated are skipped. Pass
+--allow-no-change to force a rebuild and write a .no_change_rebuild timestamp
+marker.
 
 When rendering all components (-a), the --clean-stale flag prunes orphan
 rendered-spec directories (per-component dirs that no longer correspond to
@@ -569,9 +570,7 @@ func prepareOneComponent(
 		}}
 	}
 
-	unchanged, unchangedErr := lockfileFreeComponentUnchanged(
-		env, comp, compOutputDir,
-	)
+	unchanged, unchangedErr := lockfileFreeComponentUnchanged(env, comp, compOutputDir)
 	if unchangedErr != nil {
 		slog.Error("Failed to compare component with its last rendered configuration",
 			"component", componentName, "error", unchangedErr)
@@ -596,13 +595,7 @@ func prepareOneComponent(
 	}
 
 	prep, err := prepareComponentSources(
-		env,
-		mockProcessor,
-		comp,
-		stagingDir,
-		compOutputDir,
-		specEditor,
-		rpmDevBumpspec,
+		env, mockProcessor, comp, stagingDir, compOutputDir, specEditor, rpmDevBumpspec,
 	)
 	if err != nil {
 		slog.Error("Failed to prepare component sources",
