@@ -53,16 +53,16 @@ required.
 
 ### TMT Fields
 
-The `[tests.<name>.tmt]` subtable identifies a pinned upstream TMT plan. It is
-also used by [`azldev component test`](../cli/azldev_component_test.md) to run
-the mapped plan locally in a QEMU VM. Local execution clones the source at the
+The `[tests.<name>.tmt]` subtable identifies an upstream TMT plan. It is also
+used by [`azldev component test`](../cli/azldev_component_test.md) to run the
+mapped plan locally in a QEMU VM. Local execution clones the source at the
 configured commit, provisions the supplied image with TMT/testcloud, and
 installs the RPMs passed through `--rpm` before the plan runs.
 
 | Field | TOML Key | Type | Description |
 |-------|----------|------|-------------|
-| Source | `source` | table (`git-url`, `ref`) | Git repository containing the plan. Required; `ref` must be a full 40-character hex commit SHA. |
-| Plan | `plan` | string | Absolute TMT plan name to run. Required. |
+| Source | `source` | table (`git-url`, `ref`) | Git repository containing the plan. Optional; when omitted, the test source must instead be supplied directly with `--source-dir`. When present, `ref` must be a full 40-character hex commit SHA. |
+| Plan | `plan` | string | Absolute TMT plan name to run. Optional; when omitted, tmt discovers and runs every enabled plan it finds (see [TMT Tests & fmf Metadata](../../explanation/tmt-tests.md)). `--provision virtual` always requires an explicit plan (via this field or `--plan`), since hardware export is resolved per-plan. |
 
 For example, define a plan as follows:
 
