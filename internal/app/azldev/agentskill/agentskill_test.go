@@ -568,17 +568,17 @@ func TestCatalog_SkillContentByMode(t *testing.T) {
 	defaultCompDoc, err := agentskill.NewCatalog(false).SkillDocument("azldev-comp-toml", params)
 	require.NoError(t, err)
 	assert.Contains(t, defaultCompDoc, "rejects this value")
-	assert.Contains(t, defaultCompDoc, "`render.skip-file-filter` is accepted only for compatibility")
-	assert.NotContains(t, defaultCompDoc, "rendering edge-case escape hatch")
+	assert.Contains(t, defaultCompDoc, "rendering edge-case escape hatch")
+	assert.Contains(t, defaultCompDoc, "filenames with macros that `spectool` cannot expand")
 
 	withoutLockfileCompDoc, err := agentskill.NewCatalog(true).
 		SkillDocument("azldev-comp-toml", params)
 	require.NoError(t, err)
 	assert.Contains(t, withoutLockfileCompDoc, "`static` — unsupported by lock-file-free render")
 	assert.Contains(t, withoutLockfileCompDoc,
-		"`render.skip-file-filter` is accepted only for compatibility")
+		"filenames with macros that `spectool` cannot expand")
 	assert.NotContains(t, withoutLockfileCompDoc, "Force `autorelease` or `static`")
-	assert.NotContains(t, withoutLockfileCompDoc, "rendering edge-case escape hatch")
+	assert.Contains(t, withoutLockfileCompDoc, "rendering edge-case escape hatch")
 }
 
 // TestCatalog_InstructionsPointAtModeSkills verifies that instruction wrappers point

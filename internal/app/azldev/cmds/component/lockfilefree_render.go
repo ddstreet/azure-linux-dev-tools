@@ -200,6 +200,18 @@ func prepareLockfileFreeRender(
 		return nil, err
 	}
 
+	calculation := comp.GetConfig().Release.Calculation
+	if calculation == "" {
+		calculation = projectconfig.ReleaseCalculationAuto
+	}
+
+	if calculation == projectconfig.ReleaseCalculationStatic {
+		return nil, fmt.Errorf(
+			"component %#q cannot use 'release.calculation = \"static\"' "+
+				"with '--without-lockfile component render'; use 'auto', 'autorelease', or 'manual'",
+			componentName)
+	}
+
 	if comp.GetConfig().Spec.SourceType != projectconfig.SpecSourceTypeUpstream {
 		return prepareLocalLockfileFreeRender(env.FS(), specPath, componentName)
 	}
@@ -246,6 +258,11 @@ func prepareUpstreamLockfileFreeRender(
 		return nil, fmt.Errorf("reading upstream Release value:\n%w", err)
 	}
 
+	calculation := comp.GetConfig().Release.Calculation
+	if calculation == "" {
+		calculation = projectconfig.ReleaseCalculationAuto
+	}
+
 	usesAutorelease := sources.ReleaseUsesAutorelease(upstreamRelease)
 	currentUpstreamCommit := comp.GetConfig().EffectiveUpstreamCommit()
 
@@ -265,32 +282,20 @@ func prepareUpstreamLockfileFreeRender(
 
 	message := simpleRenderCommitMessage(componentName, upstreamMessages)
 
-	switch {
-	case usesAutorelease:
-		if err := prepareAutoreleaseSpec(
-			ctx,
-			env,
-			specPath,
-			workingDir,
-			existingDistGitDir,
-			existing,
-			upstreamChanged,
-		); err != nil {
-			return nil, err
-		}
-	default:
-		if err := prepareStaticReleaseSpec(
-			ctx,
-			env,
-			specPath,
-			existingDistGitDir,
-			existing,
-			upstreamChanged,
-			upstreamRelease,
-			message,
-		); err != nil {
-			return nil, err
-		}
+	if err := manageUpstreamRenderRelease(
+		ctx,
+		env,
+		specPath,
+		workingDir,
+		existingDistGitDir,
+		existing,
+		upstreamChanged,
+		upstreamRelease,
+		message,
+		calculation,
+		usesAutorelease,
+	); err != nil {
+		return nil, err
 	}
 
 	protected, err := readProtectedSpecFields(env.FS(), specPath)
@@ -302,6 +307,67 @@ func prepareUpstreamLockfileFreeRender(
 		commitMessage: message,
 		protected:     protected,
 	}, nil
+}
+
+func manageUpstreamRenderRelease(
+	ctx context.Context,
+	env *azldev.Env,
+	specPath string,
+	workingDir string,
+	existingDistGitDir string,
+	existing bool,
+	upstreamChanged bool,
+	upstreamRelease string,
+	message string,
+	calculation projectconfig.ReleaseCalculation,
+	usesAutorelease bool,
+) error {
+	switch calculation {
+	case projectconfig.ReleaseCalculationManual:
+		return nil
+	case projectconfig.ReleaseCalculationAutorelease:
+		return prepareAutoreleaseSpec(
+			ctx,
+			env,
+			specPath,
+			workingDir,
+			existingDistGitDir,
+			existing,
+			upstreamChanged,
+			usesAutorelease,
+		)
+	case projectconfig.ReleaseCalculationStatic:
+		return errors.New(
+			"'release.calculation = \"static\"' is not supported for lock-file-free rendering",
+		)
+	case projectconfig.ReleaseCalculationAuto:
+		if usesAutorelease {
+			return prepareAutoreleaseSpec(
+				ctx,
+				env,
+				specPath,
+				workingDir,
+				existingDistGitDir,
+				existing,
+				upstreamChanged,
+				true,
+			)
+		}
+
+		return prepareStaticReleaseSpec(
+			ctx,
+			env,
+			specPath,
+			workingDir,
+			existingDistGitDir,
+			existing,
+			upstreamChanged,
+			upstreamRelease,
+			message,
+		)
+	default:
+		return fmt.Errorf("unknown release calculation mode %#q", calculation)
+	}
 }
 
 func renderedUpstreamChanges(
@@ -354,6 +420,7 @@ func prepareAutoreleaseSpec(
 	existingDistGitDir string,
 	existing bool,
 	upstreamChanged bool,
+	updateBase bool,
 ) error {
 	if err := initializeAutoreleaseSpec(
 		ctx, env, specPath, workingDir, existingDistGitDir, existing,
@@ -361,7 +428,7 @@ func prepareAutoreleaseSpec(
 		return err
 	}
 
-	if !existing || upstreamChanged {
+	if updateBase && (!existing || upstreamChanged) {
 		return updateAutoreleaseBase(ctx, env, specPath, workingDir)
 	}
 
@@ -391,7 +458,7 @@ func initializeAutoreleaseSpec(
 			return fmt.Errorf("writing generated changelog %#q:\n%w", changelogPath, err)
 		}
 
-		return nil
+		return setAutoreleaseChangelog(env.FS(), specPath)
 	}
 
 	existingSpecPath := filepath.Join(existingDistGitDir, filepath.Base(specPath))
@@ -617,6 +684,7 @@ func prepareStaticReleaseSpec(
 	ctx context.Context,
 	env *azldev.Env,
 	specPath string,
+	workingDir string,
 	existingDistGitDir string,
 	existing bool,
 	upstreamChanged bool,
@@ -646,9 +714,115 @@ func prepareStaticReleaseSpec(
 		}
 	}
 
-	_, err := runRenderHostCommand(ctx, env, "rpmdev-bumpspec", "-c", message, specPath)
+	return runDeterministicRenderBumpSpec(
+		ctx, env, workingDir, specPath, message,
+	)
+}
 
-	return err
+func setAutoreleaseChangelog(fs opctx.FS, specPath string) error {
+	content, err := fileutils.ReadFile(fs, specPath)
+	if err != nil {
+		return fmt.Errorf("reading spec %#q:\n%w", specPath, err)
+	}
+
+	changelog := []byte("%changelog\n%autochangelog\n")
+	updated := replaceChangelogSection(content, changelog, true)
+
+	return writeExistingMode(fs, specPath, updated)
+}
+
+func runDeterministicRenderBumpSpec(
+	ctx context.Context,
+	env *azldev.Env,
+	workingDir string,
+	specPath string,
+	message string,
+) error {
+	userString, datestamp, err := projectHeadBumpMetadata(env)
+	if err != nil {
+		return err
+	}
+
+	return runRenderBumpSpec(
+		ctx, env, workingDir, specPath, message, userString, datestamp,
+	)
+}
+
+func runRenderBumpSpec(
+	ctx context.Context,
+	env *azldev.Env,
+	workingDir string,
+	specPath string,
+	message string,
+	userString string,
+	datestamp string,
+) error {
+	if !env.CommandInSearchPath(sources.RPMDevBumpspecBinary) {
+		return fmt.Errorf("required command %#q was not found in PATH", sources.RPMDevBumpspecBinary)
+	}
+
+	args := []string{
+		"-c", message,
+		"--userstring", userString,
+		"--datestamp", datestamp,
+		specPath,
+	}
+	rawCmd := exec.CommandContext(ctx, sources.RPMDevBumpspecBinary, args...)
+	rawCmd.Dir = workingDir
+
+	var stderr bytes.Buffer
+
+	rawCmd.Stderr = &stderr
+
+	cmd, err := env.Command(rawCmd)
+	if err != nil {
+		return fmt.Errorf("creating command '%s %s':\n%w",
+			sources.RPMDevBumpspecBinary, strings.Join(args, " "), err)
+	}
+
+	if err := cmd.Run(ctx); err != nil {
+		return fmt.Errorf("command '%s %s' failed:\n%s\n%w",
+			sources.RPMDevBumpspecBinary, strings.Join(args, " "), stderr.String(), err)
+	}
+
+	return nil
+}
+
+func projectHeadBumpMetadata(env *azldev.Env) (userString string, datestamp string, err error) {
+	repo, err := gitutils.OpenProjectRepo(env.ProjectDir())
+	if err != nil {
+		return "", "", fmt.Errorf("opening project repository for release metadata:\n%w", err)
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		return "", "", fmt.Errorf("resolving project HEAD for release metadata:\n%w", err)
+	}
+
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return "", "", fmt.Errorf("reading project HEAD for release metadata:\n%w", err)
+	}
+
+	return bumpSpecMetadata(commit.Author)
+}
+
+func bumpSpecMetadata(author object.Signature) (userString string, datestamp string, err error) {
+	name := strings.TrimSpace(author.Name)
+	email := strings.TrimSpace(author.Email)
+
+	switch {
+	case name != "" && email != "":
+		userString = name + " <" + email + ">"
+	case name != "":
+		userString = name
+	case email != "":
+		userString = "<" + email + ">"
+	default:
+		return "", "", errors.New("project HEAD author has no name or email")
+	}
+
+	return userString, author.When.UTC().Format("Mon Jan 02 2006"), nil
 }
 
 func previousRenderedUpstreamCommit(

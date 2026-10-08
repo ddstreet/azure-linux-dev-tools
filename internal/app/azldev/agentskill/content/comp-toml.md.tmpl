@@ -31,7 +31,7 @@ Add sub-tables only for what you change. The fields you will reach for most:
 | `overlays` / `overlay-files` | targeted spec/source edits (see the `azldev-overlays` skill) |
 | `build.defines` / `build.with` / `build.without` | RPM macro and bcond build tweaks |
 | `release.calculation` | how the `Release` tag is managed |
-| `render.skip-file-filter` | deprecated compatibility setting; ignored |
+| `render.skip-file-filter` | rendering edge-case escape hatch |
 
 ## Spec source
 
@@ -98,8 +98,10 @@ used. `%autorelease` behavior is unchanged on either path.
 
 ## Render configuration
 
-Render preserves all dist-git files except `.git`.
-`render.skip-file-filter` is accepted only for compatibility and has no effect.
+azldev normally removes files not referenced by the rendered spec's
+`Source`/`Patch` tags. Set `render.skip-file-filter = true` only when a spec uses
+filenames with macros that `spectool` cannot expand and all dist-git files must
+be preserved.
 
 ## File organization
 

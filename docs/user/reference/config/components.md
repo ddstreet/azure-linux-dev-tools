@@ -147,17 +147,15 @@ explicitly selected. `%autorelease` behavior is unchanged.
 In lock-file-free mode, `component render` does not generate synthetic history:
 
 - Local components must use `auto`, `autorelease`, or `manual`. Their `Release`,
-  spec changelog, and `changelog` file are preserved. For local components,
-  `auto` means `autorelease` when `%autorelease` is detected and `manual`
-  otherwise; both behaviors preserve the files.
+  spec changelog, and `changelog` file are preserved.
 - Upstream `manual` components are also preserved.
 - Upstream `autorelease` components, including `auto` components where
-  `%autorelease` is detected, inspect only whether the rendered dist-git dir
-  exists in `HEAD`. If it does not, render runs `rpmautospec generate-changelog`
-  against the pristine upstream checkout before applying overlays, writes the
-  result to `changelog`, and replaces the rendered spec's `%changelog` body with
-  `%autochangelog`. If the directory already exists in `HEAD`, render makes no
-  release or changelog adjustment.
+  `%autorelease` is detected, generate a `changelog` file and replace the
+  spec's `%changelog` body with `%autochangelog` on first render. Later renders
+  preserve that state. When migrating an existing rpmautospec-processed spec,
+  render recovers its release base and untrimmed changelog with `rpmspec`.
+  New components and components with a changed upstream commit update
+  `%autorelease -b` with `rpmautospec calculate-release --number-only`.
 - Upstream `auto` components without `%autorelease` run `rpmdev-bumpspec` on the
   prepared spec. The project `HEAD` author and UTC commit date are passed
   explicitly for deterministic changelog output.
@@ -171,13 +169,19 @@ The `[components.<name>.render]` section controls rendering behavior for a compo
 
 | Field | TOML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
-| Skip file filter | `skip-file-filter` | boolean | No | Deprecated compatibility setting; ignored |
+| Skip file filter | `skip-file-filter` | boolean | No | Disable post-render file filtering (defaults to `false`) |
 
 ### Skip File Filter
 
-`skip-file-filter` is retained for compatibility with existing configuration
-files but is ignored. Rendering always preserves every file in the prepared
-dist-git dir.
+During rendering, azldev uses `spectool` to identify files referenced by
+`Source` and `Patch` tags, then removes unreferenced files from the output.
+If a spec uses macros that `spectool` cannot expand, azldev preserves all files
+automatically. Set `skip-file-filter = true` to explicitly preserve every file:
+
+```toml
+[components.dejavu-fonts.render]
+skip-file-filter = true
+```
 
 ## Build Configuration
 
