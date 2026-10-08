@@ -711,6 +711,10 @@ func (s *structuralSpec) AddChangelogEntry(user, email, version, release string,
 	})
 }
 
+func (s *structuralSpec) SetAutoreleaseChangelog() {
+	s.rawLines = setAutoreleaseChangelog(s.rawLines)
+}
+
 // HasSection returns true if the spec contains a section with the given name.
 // The comparison is exact (case-sensitive), consistent with [AppendLinesToSection].
 func (s *structuralSpec) HasSection(sectionName string) (bool, error) {

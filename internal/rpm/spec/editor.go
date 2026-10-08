@@ -57,6 +57,7 @@ type specEditor interface {
 	AppendLinesToSection(string, string, []string) error
 	SearchAndReplace(string, string, string, string) error
 	AddChangelogEntry(string, string, string, string, time.Time, []string) error
+	SetAutoreleaseChangelog()
 	HasSection(string) (bool, error)
 	AddPatchEntry(string, string) error
 	RemovePatchEntry(string) error
@@ -227,6 +228,11 @@ func (s *Spec) SearchAndReplace(section, pkg, regex, replacement string) error {
 //nolint:wrapcheck // Preserve errors returned by the selected editor.
 func (s *Spec) AddChangelogEntry(user, email, version, release string, at time.Time, details []string) error {
 	return s.activeEditor().AddChangelogEntry(user, email, version, release, at, details)
+}
+
+// SetAutoreleaseChangelog replaces the base '%changelog' body with '%autochangelog'.
+func (s *Spec) SetAutoreleaseChangelog() {
+	s.activeEditor().SetAutoreleaseChangelog()
 }
 
 // HasSection reports whether a section exists.
