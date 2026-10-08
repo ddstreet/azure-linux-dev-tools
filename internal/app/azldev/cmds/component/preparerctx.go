@@ -40,7 +40,7 @@ func renderGitRepoPreparerOptions(
 ) []sources.PreparerOption {
 	if env.WithoutLockfile() {
 		return []sources.PreparerOption{
-			sources.WithPreserveGitRepo(),
+			sources.WithPreserveGitDir(),
 		}
 	}
 

@@ -22,6 +22,14 @@ const buildProvenanceMockSubdir = "azldev-provenance-mock"
 // scrubbing the mock chroot, so a hung scrub can't block command shutdown.
 const mockProcessorCleanupTimeout = 5 * time.Minute
 
+// createMockProcessor creates a lazily initialized [sources.MockProcessor]
+// using the project/build distro's mock config. Source providers may use a
+// different per-component upstream distro, which must not select the build
+// chroot. Returns nil when the project mock config is unavailable.
+func createMockProcessor(env *azldev.Env) *sources.MockProcessor {
+	return newMockProcessor(env, "", mockPackagesForRender())
+}
+
 // createQueryMockProcessor creates a [sources.MockProcessor] with the packages
 // needed for querying specs.
 func createQueryMockProcessor(env *azldev.Env) *sources.MockProcessor {
@@ -40,7 +48,7 @@ func createBuildMockProcessor(env *azldev.Env) *sources.MockProcessor {
 		isolatedBaseDir = filepath.Join(workDir, buildProvenanceMockSubdir)
 	}
 
-	return newMockProcessor(env, isolatedBaseDir, mockPackagesForProvenance())
+	return newMockProcessor(env, isolatedBaseDir, mockPackagesForRender())
 }
 
 // newMockProcessor resolves the project/build distro mock config and builds a

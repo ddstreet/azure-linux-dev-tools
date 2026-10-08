@@ -5,21 +5,23 @@ package component
 
 // Required-package presets for the shared MockProcessor.
 //
-// Upstream provenance needs rpmautospec and git to resolve %autorelease from
-// commit history. python3-click is required by rpmautospec but not declared as
-// an RPM dependency.
+// Render needs rpmautospec (macro expansion), rpmdevtools (spectool), and git
+// (required for rpmautospec to read commit history). python3-click is required
+// by rpmautospec but not declared as an RPM dependency. Ecosystem macro
+// packages (go-srpm-macros, etc.) are already present via @buildsys-build →
+// azurelinux-rpm-config.
 //
 // Query needs rpm-build for the `rpmspec` binary. It's typically already
 // pulled in via @buildsys-build, but we install it explicitly so we don't
 // depend on a particular buildgroup composition.
-func mockPackagesForProvenance() []string {
-	return []string{"rpmautospec", "git", "python3-click"}
+func mockPackagesForRender() []string {
+	return []string{"rpmautospec", "rpmdevtools", "git", "python3-click"}
 }
 
 func mockPackagesForQuery() []string {
 	// rpm-build provides rpmspec; python3 is needed to run query_process.py.
-	// (The provenance path gets python3 transitively via python3-click, but
-	// the query path doesn't install rpmautospec/python3-click.)
+	// (The render path gets python3 transitively via python3-click, but the
+	// query path doesn't install rpmautospec/python3-click.)
 	//
 	// Additional macro packages are installed so that build-time macros
 	// affecting %files / %package expansion (and therefore --builtrpms
