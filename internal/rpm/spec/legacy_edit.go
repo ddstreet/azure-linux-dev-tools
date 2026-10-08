@@ -621,11 +621,15 @@ func (s *legacySpec) AddChangelogEntry(user, email, version, release string, tim
 
 // SetAutoreleaseChangelog replaces the contents of the base '%changelog'
 // section with '%autochangelog'. If the section does not exist, it is appended.
-func (s *Spec) SetAutoreleaseChangelog() {
-	changelogStart := -1
-	changelogEnd := len(s.rawLines)
+func (s *legacySpec) SetAutoreleaseChangelog() {
+	s.rawLines = setAutoreleaseChangelog(s.rawLines)
+}
 
-	for lineNumber, line := range s.rawLines {
+func setAutoreleaseChangelog(rawLines []string) []string {
+	changelogStart := -1
+	changelogEnd := len(rawLines)
+
+	for lineNumber, line := range rawLines {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "%") {
 			continue
@@ -653,17 +657,15 @@ func (s *Spec) SetAutoreleaseChangelog() {
 	}
 
 	if changelogStart < 0 {
-		if len(s.rawLines) > 0 && s.rawLines[len(s.rawLines)-1] != "" {
-			s.rawLines = append(s.rawLines, "")
+		if len(rawLines) > 0 && rawLines[len(rawLines)-1] != "" {
+			rawLines = append(rawLines, "")
 		}
 
-		s.rawLines = append(s.rawLines, "%changelog", "%autochangelog")
-
-		return
+		return append(rawLines, "%changelog", "%autochangelog")
 	}
 
-	s.rawLines = slices.Replace(
-		s.rawLines, changelogStart+1, changelogEnd, "%autochangelog",
+	return slices.Replace(
+		rawLines, changelogStart+1, changelogEnd, "%autochangelog",
 	)
 }
 
