@@ -21,8 +21,11 @@ import (
 var ErrScenario = errors.New("scenario test failed")
 
 const (
-	e2eTargetAll   = "all"
-	e2eTargetImage = "image"
+	e2eTargetAll                  = "all"
+	e2eTargetComponentIdempotency = "component-idempotency"
+	e2eTargetFullRender           = "full-render"
+	e2eTargetImage                = "image"
+	e2eTargetTMT                  = "tmt"
 )
 
 // Scenario runs the scenario tests.
@@ -49,7 +52,7 @@ func ScenarioUpdate() error {
 	return nil
 }
 
-// E2E runs one of: [all, image]. The default is all.
+// E2E runs one of: [all, component-idempotency, full-render, image, tmt]. The default is all.
 // These tests are tagged with the `e2e` build tag
 // (separate from `scenario`) so that they do not run as part of `mage scenario`,
 // `mage scenarioUpdate`, or `mage all` — they are intentionally heavier
@@ -84,12 +87,33 @@ func E2E(target *string) error {
 		options.label = "image-build end-to-end"
 		options.timeout = "25m"
 		options.testSelector = "^TestAzureLinuxImageBuild$"
+	case e2eTargetFullRender:
+		options.label = "full-render end-to-end"
+		options.testSelector = "^TestAzureLinuxComponentRenderIsIdempotent$"
+	case e2eTargetComponentIdempotency:
+		options.label = "component-idempotency end-to-end"
+		options.timeout = "45m"
+		options.testSelector = "^(TestAzureLinuxComponentUpdateIsIdempotent|" +
+			"TestAzureLinuxComponentRenderSubsetIsIdempotent)$"
+	case e2eTargetTMT:
+		options.label = "virtual TMT end-to-end"
+		options.timeout = "45m"
+		options.testSelector = "^TestTMTVirtualProvisioning$"
+		options.additionalEnv = map[string]string{
+			"TESTING_ENABLE_TMT_VIRTUAL_E2E": "1",
+		}
 	default:
 		return fmt.Errorf(
 			"%w: unknown end-to-end target %#q; available targets: %q",
 			ErrScenario,
 			selectedTarget,
-			[]string{e2eTargetAll, e2eTargetImage},
+			[]string{
+				e2eTargetAll,
+				e2eTargetComponentIdempotency,
+				e2eTargetFullRender,
+				e2eTargetImage,
+				e2eTargetTMT,
+			},
 		)
 	}
 
@@ -148,6 +172,8 @@ type scenarioGoTestOptions struct {
 	// testSelector, when set, is passed to 'go test -run' to execute one
 	// focused test without running the rest of the selected tier.
 	testSelector string
+	// additionalEnv adds target-specific environment variables to the test process.
+	additionalEnv map[string]string
 }
 
 func runScenarioGoTest(options scenarioGoTestOptions) error {
@@ -165,6 +191,9 @@ func runScenarioGoTest(options scenarioGoTestOptions) error {
 	// mage knows the exact path to the azldev binary, ensure we use it.
 	env := map[string]string{
 		buildtestenv.TestingAzldevBinPathEnvVar: path.Join(mageutil.BinDir(), "azldev"),
+	}
+	for name, value := range options.additionalEnv {
+		env[name] = value
 	}
 
 	if options.doSnapshotUpdate {
