@@ -109,7 +109,6 @@ azldev component test COMPONENT [flags]
   -q, --quiet                     only enable minimal output
       --spec-editor editor        Select the RPM spec editor (legacy or experimental) (default legacy)
   -v, --verbose                   enable verbose output
-      --without-lockfile          preview: track resolved upstream commits in generated config instead of lock files
 ```
 
 ### SEE ALSO

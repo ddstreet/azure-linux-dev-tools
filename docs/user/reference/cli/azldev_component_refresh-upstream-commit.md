@@ -15,10 +15,9 @@ files before component-specific TOML configuration so subsequent commands use
 the generated commit unless the component configuration explicitly overrides
 it.
 
-Without --without-lockfile, only components listed in lockless-components.txt
+Only components listed in lockless-components.txt
 beside the top-level azldev.toml are refreshed. Other components are skipped
-and their generated TOML files are preserved. With the global flag, every
-component uses the lockless workflow.
+and their generated TOML files are preserved.
 
 All TOML configuration is resolved before the source type is checked. Selected
 components whose effective spec.type is not "upstream" do not contact an
@@ -92,7 +91,6 @@ azldev component refresh-upstream-commit [flags]
   -q, --quiet                     only enable minimal output
       --spec-editor editor        Select the RPM spec editor (legacy or experimental) (default legacy)
   -v, --verbose                   enable verbose output
-      --without-lockfile          preview: track resolved upstream commits in generated config instead of lock files
 ```
 
 ### SEE ALSO
