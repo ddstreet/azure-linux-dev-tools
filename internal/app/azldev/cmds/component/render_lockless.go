@@ -32,6 +32,10 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/prereqs"
 )
 
+const noChangeRebuildMarker = ".no-change-rebuild"
+
+var errNoRenderChanges = errors.New("no change since the last render; use '--no-change-rebuild' to rebuild anyway")
+
 type locklessRenderUpdate struct {
 	repoRoot string
 	path     string
@@ -636,6 +640,58 @@ func renderChangelogBounds(content []byte, editor spec.EditorMode) (start int, e
 	}
 
 	return start, end, nil
+}
+
+func finishLocklessSpec(
+	env *azldev.Env, path string, update *locklessRenderUpdate, changed, noChangeRebuild bool,
+) (bool, error) {
+	if !changed {
+		if !noChangeRebuild {
+			return false, errNoRenderChanges
+		}
+
+		if err := writeNoChangeRebuild(env, filepath.Dir(path)); err != nil {
+			return false, err
+		}
+	}
+
+	bumped, err := bumpLocklessSpec(env, path, update)
+
+	return !changed || bumped, err
+}
+
+func writeNoChangeRebuild(env *azldev.Env, dir string) error {
+	if env.DryRun() {
+		return nil
+	}
+
+	if err := prereqs.RequireExecutable(env, "date", nil); err != nil {
+		return fmt.Errorf("no-change rebuild requires 'date':\n%w", err)
+	}
+
+	raw := exec.CommandContext(env, "date", "-Is")
+	raw.Dir = dir
+
+	var stderr bytes.Buffer
+
+	raw.Stderr = &stderr
+
+	command, err := env.Command(raw)
+	if err != nil {
+		return fmt.Errorf("creating rebuild timestamp command:\n%w", err)
+	}
+
+	output, err := command.RunAndGetOutput(env)
+	if err != nil {
+		return fmt.Errorf("getting rebuild timestamp (%s):\n%w", stderr.String(), err)
+	}
+
+	if err := fileutils.WriteFile(env.FS(), filepath.Join(dir, noChangeRebuildMarker),
+		[]byte(output), fileperms.PublicFile); err != nil {
+		return fmt.Errorf("writing rebuild timestamp:\n%w", err)
+	}
+
+	return nil
 }
 
 func bumpLocklessSpec(env *azldev.Env, path string, update *locklessRenderUpdate) (bool, error) {
