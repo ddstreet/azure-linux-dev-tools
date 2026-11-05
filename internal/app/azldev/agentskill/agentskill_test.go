@@ -189,6 +189,7 @@ func TestSkillsDocumentAutomaticLocklessRenderCommits(t *testing.T) {
 		assert.Contains(t, doc, "`--changelog-comment`")
 		assert.Contains(t, doc, "`update <component-name>`")
 		assert.Contains(t, doc, "`--no-git-commit` skips automatic staging and committing")
+		assert.Contains(t, doc, "`azldev comp make-lockless`")
 	}
 
 	doc, err := agentskill.SkillDocument("azldev-refresh-upstream-commit", testParams())
@@ -222,6 +223,7 @@ func TestSkillsDocumentAutomaticLocklessRenderCommits(t *testing.T) {
 	assert.Contains(t, doc, "`--changelog-comment`")
 	assert.Contains(t, doc, "`update <component-name>`")
 	assert.Contains(t, doc, "`--no-git-commit` skips automatic staging and committing")
+	assert.Contains(t, doc, "`azldev comp make-lockless`")
 	assert.NotContains(t, doc, "git commit --amend")
 }
 
